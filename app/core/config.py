@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
 
+    FIREBASE_CREDENTIALS_FILE: str | None = None
+
     @property
     def DATABASE_URL(self) -> str:
         return (
