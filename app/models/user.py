@@ -16,7 +16,10 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    firebase_uid: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    # Informativo: pode mudar no Firebase (ex: troca de e-mail) sem afetar a
+    # identidade do usuário, que é sempre firebase_uid.
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
     # Firebase Auth é quem detém a credencial (seção 2); mantido nullable pois
     # o backend nunca recebe/verifica senha diretamente.
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)

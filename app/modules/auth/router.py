@@ -17,14 +17,15 @@ def register(
     decoded_token: dict = Depends(get_verified_token),
     db: Session = Depends(get_db),
 ):
+    firebase_uid = decoded_token.get("uid")
     email = decoded_token.get("email")
-    if not email:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token missing email claim")
+    if not firebase_uid or not email:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token missing uid or email claim")
 
-    if db.query(User).filter(User.email == email).first():
+    if db.query(User).filter(User.firebase_uid == firebase_uid).first():
         raise HTTPException(status.HTTP_409_CONFLICT, "User already registered")
 
-    user = User(email=email, phone=payload.phone, pix_key=payload.pix_key)
+    user = User(firebase_uid=firebase_uid, email=email, phone=payload.phone, pix_key=payload.pix_key)
     db.add(user)
     db.commit()
     db.refresh(user)
