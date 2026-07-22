@@ -34,3 +34,20 @@ class Cube(Base):
     acquired_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+# PRD: todo usuário ganha um cubo comum ao se registrar. speed=1.00 é o
+# multiplicador base (sem bônus); bonus_chance=5% é o piso da rarity mais
+# baixa -- tiers superiores (ainda não compráveis nesta fase) subiriam a
+# partir daqui.
+STARTER_CUBE_SPEED = Decimal("1.00")
+STARTER_CUBE_BONUS_CHANCE = Decimal("0.0500")
+
+
+def create_starter_cube(user_id: int) -> Cube:
+    return Cube(
+        user_id=user_id,
+        type=CubeType.COMUM,
+        speed=STARTER_CUBE_SPEED,
+        bonus_chance=STARTER_CUBE_BONUS_CHANCE,
+    )

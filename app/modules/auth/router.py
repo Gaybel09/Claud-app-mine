@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core import firebase
 from app.core.security import get_current_user, get_verified_token
 from app.db.session import get_db
+from app.models.cube import create_starter_cube
 from app.models.user import User
 from app.schemas.auth import TwoFactorVerifyRequest
 from app.schemas.user import UserRegister, UserRead
@@ -27,6 +28,11 @@ def register(
 
     user = User(firebase_uid=firebase_uid, email=email, phone=payload.phone, pix_key=payload.pix_key)
     db.add(user)
+    db.flush()  # popula user.id para o cubo inicial referenciar via FK
+
+    # PRD: usuário ganha um cubo comum ao se registrar.
+    db.add(create_starter_cube(user.id))
+
     db.commit()
     db.refresh(user)
     return user
