@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1024379082477",
+    "project_id": "cubemine-pix",
+    "storage_bucket": "cubemine-pix.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1024379082477:android:58e2f9c5de0045b24d1ee4",
+        "android_client_info": {
+          "package_name": "com.cubeminepix.cubemine_pix"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDw7aCdm4wa4FF33VyF93iHMJwqUkwwDRg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
