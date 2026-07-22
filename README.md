@@ -56,3 +56,17 @@ docker compose exec api alembic upgrade head
 pip install -r requirements.txt
 POSTGRES_HOST=localhost REDIS_HOST=localhost pytest
 ```
+
+## Deploy (Render)
+
+`render.yaml` na raiz define o Blueprint: serviço web (gunicorn + worker
+uvicorn), Postgres e Redis (Key Value) gerenciados. `DATABASE_URL` e
+`REDIS_URL` vêm prontos desses serviços via `fromDatabase`/`fromService` --
+não são hardcoded. As migrations (`alembic upgrade head`) rodam no
+`startCommand`, antes do servidor subir, a cada deploy.
+
+O worker Celery (`app/workers/`) ainda não está no blueprint -- só a API +
+banco + cache, conforme a Fase 1.
+
+`FIREBASE_CREDENTIALS_FILE` precisa ser configurado manualmente no dashboard
+da Render depois do primeiro deploy (não vai em texto claro no blueprint).

@@ -1,0 +1,51 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec).
+# Sobe o backend FastAPI (Fase 1) com Postgres e Redis gerenciados.
+#
+# O worker Celery (app/workers/) ainda não está declarado aqui -- este
+# blueprint cobre só a API + banco + cache, conforme pedido.
+
+databases:
+  - name: cubemine-pix-db
+    databaseName: cubemine_pix
+    user: cubemine
+    plan: free
+    region: oregon
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: cubemine-pix-api
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    # Migrations rodam a cada deploy, antes do servidor subir -- se
+    # alembic upgrade head falhar, o deploy falha e a versão anterior
+    # continua no ar.
+    startCommand: alembic upgrade head && gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.15
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cubemine-pix-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: cubemine-pix-redis
+          property: connectionString
+      # Caminho do service account do Firebase Admin -- setar manualmente no
+      # dashboard (ex: via Secret File) depois do primeiro deploy.
+      - key: FIREBASE_CREDENTIALS_FILE
+        sync: false
+
+  - type: keyvalue
+    name: cubemine-pix-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
