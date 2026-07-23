@@ -1,5 +1,10 @@
 import logging
+from datetime import datetime, timedelta, timezone
 
+from app.core.efi import EfiApiError, EfiConfigurationError, efi_client
+from app.db.session import SessionLocal
+from app.models.withdrawal import Withdrawal, WithdrawalStatus
+from app.modules.pix.service import RECONCILE_AFTER_MINUTES, apply_efi_status
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -13,3 +18,30 @@ def send_mining_ready_notification(mining_session_id: int) -> None:
     # TODO: plugar Firebase Cloud Messaging aqui (seção 2) quando a
     # integração de push estiver configurada. Por ora só loga.
     logger.info("mining session %s is ready to collect", mining_session_id)
+
+
+@celery_app.task(name="pix.reconcile_pending_withdrawals")
+def reconcile_pending_withdrawals() -> None:
+    """Seção 11, correção v2: webhooks podem chegar fora de ordem, duplicados
+    ou nunca chegar. Todo withdrawal parado em "processing" há mais de
+    RECONCILE_AFTER_MINUTES consulta o status real na Efí em vez de confiar
+    só no webhook."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=RECONCILE_AFTER_MINUTES)
+    db = SessionLocal()
+    try:
+        stuck = (
+            db.query(Withdrawal)
+            .filter(Withdrawal.status == WithdrawalStatus.PROCESSING, Withdrawal.created_at < cutoff)
+            .all()
+        )
+        for withdrawal in stuck:
+            try:
+                result = efi_client.get_send_status(withdrawal.idempotency_key)
+            except (EfiApiError, EfiConfigurationError):
+                logger.warning("failed to reconcile withdrawal %s", withdrawal.id, exc_info=True)
+                continue
+            efi_status = result.get("status")
+            if efi_status:
+                apply_efi_status(db, id_envio=withdrawal.idempotency_key, efi_status=efi_status)
+    finally:
+        db.close()

@@ -30,6 +30,24 @@ class Settings(BaseSettings):
     DATABASE_URL_ENV: str | None = Field(default=None, validation_alias="DATABASE_URL")
     REDIS_URL_ENV: str | None = Field(default=None, validation_alias="REDIS_URL")
 
+    # Integração Pix via Efí (seção 11). Client ID/Secret e o certificado
+    # mTLS da conta vêm do painel da Efí (sejaefi.com.br) -- ver README.
+    EFI_CLIENT_ID: str | None = None
+    EFI_CLIENT_SECRET: str | None = None
+    # Caminho de arquivo do certificado (.pem/.p12) -- alternativa a
+    # EFI_CERTIFICATE_BASE64 para quem tem o arquivo montado no disco.
+    EFI_CERTIFICATE_PATH: str | None = None
+    # Conteúdo do certificado em base64, como texto -- alternativa sem
+    # precisar de um arquivo montado (ex: Render sem Secret Files). Tem
+    # prioridade sobre EFI_CERTIFICATE_PATH quando ambas estão setadas.
+    EFI_CERTIFICATE_BASE64: str | None = None
+    EFI_SANDBOX: bool = True
+    # Chave Pix da própria conta Efí que paga os saques (campo "pagador" no
+    # envio) -- não é uma credencial secreta, é um dado de configuração da
+    # conta, mas não tem como a Efí "fornecer": é a chave que você mesmo
+    # cadastrou na conta Efí para operar o Pix Out.
+    EFI_PAYER_PIX_KEY: str | None = None
+
     @property
     def DATABASE_URL(self) -> str:
         if self.DATABASE_URL_ENV:

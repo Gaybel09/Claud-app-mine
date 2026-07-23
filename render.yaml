@@ -49,6 +49,21 @@ services:
         sync: false
       - key: FIREBASE_CREDENTIALS_FILE
         sync: false
+      # Integração Pix via Efí (seção 11) -- ver .env.example/README para
+      # onde conseguir cada valor no painel da Efí. EFI_CERTIFICATE_BASE64
+      # é a via recomendada no Render (sem Secret Files).
+      - key: EFI_CLIENT_ID
+        sync: false
+      - key: EFI_CLIENT_SECRET
+        sync: false
+      - key: EFI_CERTIFICATE_BASE64
+        sync: false
+      - key: EFI_CERTIFICATE_PATH
+        sync: false
+      - key: EFI_SANDBOX
+        value: "true"
+      - key: EFI_PAYER_PIX_KEY
+        sync: false
 
   - type: keyvalue
     name: cubemine-pix-redis

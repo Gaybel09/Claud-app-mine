@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.db.base import Base
 
 # import model modules here so Alembic autogenerate can see them
-from app.models import ad_view, cube, ledger_entry, mining_session, reward_fund, user  # noqa: F401
+from app.models import ad_view, cube, ledger_entry, mining_session, reward_fund, user, withdrawal  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
