@@ -34,13 +34,19 @@ class Settings(BaseSettings):
     # mTLS da conta vêm do painel da Efí (sejaefi.com.br) -- ver README.
     EFI_CLIENT_ID: str | None = None
     EFI_CLIENT_SECRET: str | None = None
-    # Caminho de arquivo do certificado (.pem/.p12) -- alternativa a
-    # EFI_CERTIFICATE_BASE64 para quem tem o arquivo montado no disco.
+    # Caminho de arquivo do certificado -- já em PEM combinado (certificado +
+    # chave, sem senha). Alternativa de mais baixa prioridade para quem tem
+    # o arquivo montado no disco (ex: Render Secret Files).
     EFI_CERTIFICATE_PATH: str | None = None
-    # Conteúdo do certificado em base64, como texto -- alternativa sem
-    # precisar de um arquivo montado (ex: Render sem Secret Files). Tem
-    # prioridade sobre EFI_CERTIFICATE_PATH quando ambas estão setadas.
+    # O mesmo PEM combinado, em base64 como texto -- alternativa sem
+    # precisar de um arquivo montado. Tem prioridade sobre
+    # EFI_CERTIFICATE_PATH quando ambas estão setadas.
     EFI_CERTIFICATE_BASE64: str | None = None
+    # O mesmo PEM combinado colado direto, como texto puro (contém as
+    # linhas "BEGIN CERTIFICATE"/"BEGIN PRIVATE KEY") -- não precisa
+    # converter pra base64 nem apontar pra um arquivo. Tem prioridade sobre
+    # as outras duas quando mais de uma está setada.
+    EFI_CERTIFICATE_PEM: str | None = None
     EFI_SANDBOX: bool = True
     # Chave Pix da própria conta Efí que paga os saques (campo "pagador" no
     # envio) -- não é uma credencial secreta, é um dado de configuração da

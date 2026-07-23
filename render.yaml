@@ -50,11 +50,15 @@ services:
       - key: FIREBASE_CREDENTIALS_FILE
         sync: false
       # Integração Pix via Efí (seção 11) -- ver .env.example/README para
-      # onde conseguir cada valor no painel da Efí. EFI_CERTIFICATE_BASE64
-      # é a via recomendada no Render (sem Secret Files).
+      # onde conseguir cada valor no painel da Efí. EFI_CERTIFICATE_PEM (o
+      # .pem combinado colado como texto, depois de converter o .p12 que a
+      # Efí gera) é a via recomendada no Render -- sem Secret Files nem
+      # conversão pra base64.
       - key: EFI_CLIENT_ID
         sync: false
       - key: EFI_CLIENT_SECRET
+        sync: false
+      - key: EFI_CERTIFICATE_PEM
         sync: false
       - key: EFI_CERTIFICATE_BASE64
         sync: false

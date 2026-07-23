@@ -41,19 +41,51 @@ class EfiApiError(Exception):
         super().__init__(f"Efi API error {status_code}: {message}")
 
 
+_cached_certificate_path: str | None = None
+
+
+def _write_temp_pem(content: bytes) -> str:
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pem")
+    tmp.write(content)
+    tmp.flush()
+    tmp.close()
+    return tmp.name
+
+
 def _resolve_certificate_path() -> str:
-    if settings.EFI_CERTIFICATE_BASE64:
-        cert_bytes = base64.b64decode(settings.EFI_CERTIFICATE_BASE64)
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pem")
-        tmp.write(cert_bytes)
-        tmp.flush()
-        tmp.close()
-        return tmp.name
-    if settings.EFI_CERTIFICATE_PATH:
-        return settings.EFI_CERTIFICATE_PATH
-    raise EfiConfigurationError(
-        "Efi certificate not configured -- set EFI_CERTIFICATE_PATH or EFI_CERTIFICATE_BASE64"
-    )
+    """Resolve o caminho do certificado mTLS, priorizando as formas
+    "inline" (sem precisar de um arquivo já montado em disco) sobre o
+    caminho de arquivo puro:
+
+    1. EFI_CERTIFICATE_PEM -- o PEM combinado (certificado + chave, sem
+       senha) como texto puro, colado direto na variável de ambiente.
+    2. EFI_CERTIFICATE_BASE64 -- o mesmo tipo de conteúdo, mas em base64
+       (útil quando o mecanismo de env vars não aceita texto multilinha
+       de forma confiável).
+    3. EFI_CERTIFICATE_PATH -- caminho de um arquivo já existente no disco
+       (ex: um Secret File montado).
+
+    Para as duas primeiras, o conteúdo é escrito uma única vez num arquivo
+    temporário na primeira chamada (não em cada requisição) e o caminho
+    fica cacheado no processo -- não há necessidade de um hook de
+    startup separado em main.py para isso.
+    """
+    global _cached_certificate_path
+    if _cached_certificate_path:
+        return _cached_certificate_path
+
+    if settings.EFI_CERTIFICATE_PEM:
+        _cached_certificate_path = _write_temp_pem(settings.EFI_CERTIFICATE_PEM.encode("utf-8"))
+    elif settings.EFI_CERTIFICATE_BASE64:
+        _cached_certificate_path = _write_temp_pem(base64.b64decode(settings.EFI_CERTIFICATE_BASE64))
+    elif settings.EFI_CERTIFICATE_PATH:
+        _cached_certificate_path = settings.EFI_CERTIFICATE_PATH
+    else:
+        raise EfiConfigurationError(
+            "Efi certificate not configured -- set EFI_CERTIFICATE_PEM, "
+            "EFI_CERTIFICATE_BASE64, or EFI_CERTIFICATE_PATH"
+        )
+    return _cached_certificate_path
 
 
 class EfiPixClient:

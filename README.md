@@ -82,14 +82,19 @@ Saques (`POST /pix/withdraw`, seção 11) são enviados via Pix Out da Efí
 |---|---|---|
 | `EFI_CLIENT_ID` | Painel Efí -> "Minhas Aplicações" -> aplicação com escopo `pix.send` | sim |
 | `EFI_CLIENT_SECRET` | Mesmo lugar que `EFI_CLIENT_ID` | sim |
-| `EFI_CERTIFICATE_PATH` | Painel Efí -> "Certificados" -> gerar/baixar o certificado da conta (.p12/.pem); caminho do arquivo no disco | uma das duas (`_PATH` ou `_BASE64`) |
-| `EFI_CERTIFICATE_BASE64` | O mesmo arquivo de certificado, mas o conteúdo em base64 como texto (`base64 -w0 certificado.pem`) -- não precisa de arquivo montado, tem prioridade sobre `EFI_CERTIFICATE_PATH` | uma das duas |
+| `EFI_CERTIFICATE_PEM` | Painel Efí -> "Meus certificados" -> gera um `.p12`. Converta pra PEM combinado (`openssl pkcs12 -in cert.p12 -out cert.pem -nodes -legacy`) e cole o conteúdo do `.pem` aqui como texto | uma das três (`_PEM`, `_BASE64` ou `_PATH`) |
+| `EFI_CERTIFICATE_BASE64` | O mesmo `cert.pem` acima, mas em base64 (`base64 -w0 cert.pem`) | uma das três |
+| `EFI_CERTIFICATE_PATH` | O mesmo `cert.pem`, mas como caminho de arquivo no disco (ex: um Secret File já montado) | uma das três |
 | `EFI_SANDBOX` | `true` (sandbox/homologação) ou `false` (produção) -- você mesmo escolhe, não vem da Efí | sim (default `true`) |
 | `EFI_PAYER_PIX_KEY` | Uma chave Pix que você mesmo cadastra na sua conta Efí, usada como "pagador" no envio -- não é fornecida pela Efí, é configuração da sua conta | sim |
 
 Toda chamada à API da Efí (inclusive a autenticação OAuth2) exige mTLS com
 esse certificado -- é por isso que ele é obrigatório e não só client_id/
-secret.
+secret. A Efí só entrega o certificado em `.p12` (PKCS#12); o Python não lê
+esse formato direto, por isso a conversão pra PEM combinado é sempre
+necessária antes de usar qualquer uma das três variáveis acima. Quando mais
+de uma estiver setada, a prioridade é `EFI_CERTIFICATE_PEM` >
+`EFI_CERTIFICATE_BASE64` > `EFI_CERTIFICATE_PATH`.
 
 Configure também o webhook de envio de Pix no painel da Efí apontando para
 `https://SEU_HOST/pix/webhook`.
