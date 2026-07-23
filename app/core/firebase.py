@@ -1,3 +1,5 @@
+import json
+
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from firebase_admin import credentials
@@ -11,6 +13,17 @@ class InvalidFirebaseTokenError(Exception):
     pass
 
 
+def _build_credentials() -> credentials.Base:
+    # FIREBASE_CREDENTIALS_JSON tem prioridade: o JSON da service account
+    # como texto, parseado em memória -- não precisa de um arquivo montado
+    # no disco (útil em provedores como o Render sem Secret Files).
+    if settings.FIREBASE_CREDENTIALS_JSON:
+        return credentials.Certificate(json.loads(settings.FIREBASE_CREDENTIALS_JSON))
+    if settings.FIREBASE_CREDENTIALS_FILE:
+        return credentials.Certificate(settings.FIREBASE_CREDENTIALS_FILE)
+    return credentials.ApplicationDefault()
+
+
 def _get_firebase_app() -> firebase_admin.App:
     global _firebase_app
     if _firebase_app is not None:
@@ -18,12 +31,7 @@ def _get_firebase_app() -> firebase_admin.App:
     if firebase_admin._apps:
         _firebase_app = firebase_admin.get_app()
         return _firebase_app
-    cred = (
-        credentials.Certificate(settings.FIREBASE_CREDENTIALS_FILE)
-        if settings.FIREBASE_CREDENTIALS_FILE
-        else credentials.ApplicationDefault()
-    )
-    _firebase_app = firebase_admin.initialize_app(cred)
+    _firebase_app = firebase_admin.initialize_app(_build_credentials())
     return _firebase_app
 
 

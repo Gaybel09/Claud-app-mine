@@ -38,8 +38,15 @@ services:
           type: keyvalue
           name: cubemine-pix-redis
           property: connectionString
-      # Caminho do service account do Firebase Admin -- setar manualmente no
-      # dashboard (ex: via Secret File) depois do primeiro deploy.
+      # Credencial do Firebase Admin -- setar manualmente no dashboard depois
+      # do primeiro deploy. Prefira FIREBASE_CREDENTIALS_JSON (o JSON da
+      # service account colado como texto): não precisa de Secret File, e o
+      # Render não oferece upload de arquivo direto por variável de ambiente.
+      # FIREBASE_CREDENTIALS_FILE continua funcionando como alternativa para
+      # quem preferir usar Secret Files (aponte pro caminho montado, ex:
+      # /etc/secrets/<nome-do-arquivo>).
+      - key: FIREBASE_CREDENTIALS_JSON
+        sync: false
       - key: FIREBASE_CREDENTIALS_FILE
         sync: false
 

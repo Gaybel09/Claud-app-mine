@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
 
     FIREBASE_CREDENTIALS_FILE: str | None = None
+    # JSON completo da service account como texto -- alternativa a
+    # FIREBASE_CREDENTIALS_FILE para provedores sem upload de arquivo
+    # secreto fácil (ex: Render sem Secret Files). Tem prioridade sobre
+    # FIREBASE_CREDENTIALS_FILE quando ambas estão setadas.
+    FIREBASE_CREDENTIALS_JSON: str | None = None
 
     # Provedores gerenciados (ex: Render) injetam a connection string pronta
     # nessas variáveis de ambiente; quando presentes, têm prioridade sobre os
