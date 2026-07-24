@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -40,6 +41,13 @@ def _credit_balance(user_id: int, amount: Decimal) -> None:
         db.commit()
     finally:
         db.close()
+
+
+def _efi_id_envio_for(idempotency_key: str) -> str:
+    """A Efí exige idEnvio alfanumérico -- o webhook de teste precisa usar o
+    mesmo valor derivado que o backend realmente envia (ver
+    app.core.efi.derive_id_envio), não a idempotency_key crua."""
+    return efi.derive_id_envio(idempotency_key)
 
 
 def test_withdraw_rejects_insufficient_balance(client: TestClient, monkeypatch):
@@ -129,6 +137,47 @@ def test_withdraw_efi_send_failure_marks_failed_without_debiting(client: TestCli
         db.close()
 
 
+def test_send_pix_receives_alphanumeric_id_envio_derived_from_idempotency_key(
+    client: TestClient, monkeypatch
+):
+    """A Efí rejeita idEnvio com hífen (só aceita ^[a-zA-Z0-9]{1,35}$), mas
+    nossa Idempotency-Key é escolhida pelo cliente e normalmente tem hífens
+    (ex: um UUID) -- send_pix precisa receber um id_envio já derivado, nunca
+    a idempotency_key crua."""
+    user_id = _register_user(client, monkeypatch, "uid-pix-id-envio", "pix-id-envio@example.com")
+    _credit_balance(user_id, Decimal("50.00"))
+
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return {"status": "EM_PROCESSAMENTO"}
+
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", _capture)
+
+    raw_idempotency_key = "withdraw-with-hyphens-1234-5678"
+    response = client.post(
+        "/pix/withdraw",
+        json={"amount": "10.00"},
+        headers={**_auth_header(), "Idempotency-Key": raw_idempotency_key},
+    )
+    assert response.status_code == 201
+
+    id_envio = captured["id_envio"]
+    assert re.fullmatch(r"[a-zA-Z0-9]{1,35}", id_envio)
+    assert id_envio == efi.derive_id_envio(raw_idempotency_key)
+
+
+def test_derive_id_envio_is_deterministic_and_alphanumeric():
+    key = "some-uuid-1234-5678-abcd"
+    first = efi.derive_id_envio(key)
+    second = efi.derive_id_envio(key)
+
+    assert first == second
+    assert re.fullmatch(r"[a-zA-Z0-9]{1,35}", first)
+    assert efi.derive_id_envio("a-different-key") != first
+
+
 def test_webhook_confirms_and_debits_balance(client: TestClient, monkeypatch):
     user_id = _register_user(client, monkeypatch, "uid-pix-webhook", "pix-webhook@example.com")
     _credit_balance(user_id, Decimal("100.00"))
@@ -148,7 +197,7 @@ def test_webhook_confirms_and_debits_balance(client: TestClient, monkeypatch):
 
     webhook_response = client.post(
         "/pix/webhook",
-        json={"status": "REALIZADO", "gnExtras": {"idEnvio": "withdraw-webhook-1"}},
+        json={"status": "REALIZADO", "gnExtras": {"idEnvio": _efi_id_envio_for("withdraw-webhook-1")}},
     )
     assert webhook_response.status_code == 200
 
@@ -171,7 +220,10 @@ def test_duplicate_webhook_does_not_debit_twice(client: TestClient, monkeypatch)
         headers={**_auth_header(), "Idempotency-Key": "withdraw-dup-webhook-1"},
     )
 
-    payload = {"status": "REALIZADO", "gnExtras": {"idEnvio": "withdraw-dup-webhook-1"}}
+    payload = {
+        "status": "REALIZADO",
+        "gnExtras": {"idEnvio": _efi_id_envio_for("withdraw-dup-webhook-1")},
+    }
     first = client.post("/pix/webhook", json=payload)
     assert first.status_code == 200
     second = client.post("/pix/webhook", json=payload)
@@ -208,7 +260,7 @@ def test_webhook_rejected_status_marks_failed_without_debiting(client: TestClien
         json={
             "status": "NAO_REALIZADO",
             "gnExtras": {
-                "idEnvio": "withdraw-webhook-fail-1",
+                "idEnvio": _efi_id_envio_for("withdraw-webhook-fail-1"),
                 "error": {"codigo": "PIX_KEY_INVALID", "origem": "PSP", "motivo": "chave Pix inexistente"},
             },
         },

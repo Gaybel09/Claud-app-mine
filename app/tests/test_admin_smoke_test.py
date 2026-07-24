@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -82,6 +83,7 @@ def test_smoke_test_runs_all_steps_and_cleans_up(client: TestClient, monkeypatch
     assert Decimal(steps["wallet_balance"]["balance"]) == reward_amount
     assert steps["pix_withdraw"]["ok"] is True
     assert steps["pix_withdraw"]["status"] == "processing"
+    assert re.fullmatch(r"[a-zA-Z0-9]{1,35}", steps["pix_withdraw"]["efi_id_envio"])
     assert steps["pix_withdraw"]["failure_reason"] is None
     assert steps["pix_withdrawals_list"]["ok"] is True
     assert steps["pix_withdrawals_list"]["final_status"] == "processing"

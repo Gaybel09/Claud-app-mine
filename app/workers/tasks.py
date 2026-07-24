@@ -36,12 +36,12 @@ def reconcile_pending_withdrawals() -> None:
         )
         for withdrawal in stuck:
             try:
-                result = efi_client.get_send_status(withdrawal.idempotency_key)
+                result = efi_client.get_send_status(withdrawal.efi_id_envio)
             except (EfiApiError, EfiConfigurationError):
                 logger.warning("failed to reconcile withdrawal %s", withdrawal.id, exc_info=True)
                 continue
             efi_status = result.get("status")
             if efi_status:
-                apply_efi_status(db, id_envio=withdrawal.idempotency_key, efi_status=efi_status)
+                apply_efi_status(db, id_envio=withdrawal.efi_id_envio, efi_status=efi_status)
     finally:
         db.close()

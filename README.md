@@ -99,6 +99,16 @@ de uma estiver setada, a prioridade é `EFI_CERTIFICATE_PEM` >
 Configure também o webhook de envio de Pix no painel da Efí apontando para
 `https://SEU_HOST/pix/webhook`.
 
+A Efí exige que `idEnvio` (o identificador do envio, na URL de `PUT
+/v3/gn/pix/:idEnvio`) case com `^[a-zA-Z0-9]{1,35}$` -- só alfanumérico, sem
+hífen. Como `Idempotency-Key` é escolhida por quem chama `POST
+/pix/withdraw` (normalmente um UUID, com hífens), o backend nunca manda essa
+chave direto: `withdrawals.efi_id_envio` é derivado dela de forma
+determinística (`app.core.efi.derive_id_envio`, um hash truncado) e é esse
+valor que vai pra Efí e volta no webhook (`gnExtras.idEnvio`) -- a mesma
+`Idempotency-Key` sempre gera o mesmo `efi_id_envio`, preservando a garantia
+de idempotência real da Efí.
+
 Depois de configurar tudo, confirme que a autenticação OAuth2 com a Efí está
 funcionando de verdade, sem precisar fazer um saque real:
 

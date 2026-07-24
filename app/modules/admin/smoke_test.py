@@ -121,6 +121,10 @@ def run_pix_smoke_test(db: Session) -> dict:
         return {
             "withdrawal_id": withdrawal.id,
             "status": withdrawal.status,
+            # idEnvio de verdade enviado à Efí (derivado de idempotency_key
+            # -- ver app.core.efi.derive_id_envio), útil pra conferir no
+            # painel da Efí qual envio corresponde a este smoke test.
+            "efi_id_envio": withdrawal.efi_id_envio,
             # Motivo reportado pela Efí quando status == "failed" -- ver
             # Withdrawal.failure_reason. Só null quando não houve falha.
             "failure_reason": withdrawal.failure_reason,

@@ -19,6 +19,7 @@ o formato exato da resposta de envio/consulta.
 """
 
 import base64
+import hashlib
 import tempfile
 from decimal import Decimal
 
@@ -28,6 +29,20 @@ from app.core.config import settings
 
 SANDBOX_BASE_URL = "https://pix-h.api.efipay.com.br"
 PRODUCTION_BASE_URL = "https://pix.api.efipay.com.br"
+
+# A Efí exige idEnvio casando com ^[a-zA-Z0-9]{1,35}$ -- só alfanumérico,
+# sem hífen. Nossa idempotency_key normalmente é um UUID (com hífens) ou
+# qualquer string escolhida pelo chamador, então nunca passa direto.
+ID_ENVIO_LENGTH = 32
+
+
+def derive_id_envio(source: str) -> str:
+    """Deriva um idEnvio alfanumérico válido para a Efí a partir de um
+    identificador arbitrário (nossa idempotency_key). Determinístico -- o
+    mesmo `source` sempre gera o mesmo id_envio, preservando a garantia real
+    de idempotência da Efí (reenviar o mesmo idEnvio nunca duplica o
+    pagamento) mesmo com uma idempotency_key que não seja alfanumérica."""
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()[:ID_ENVIO_LENGTH]
 
 
 class EfiConfigurationError(Exception):
@@ -138,8 +153,9 @@ class EfiPixClient:
 
     def send_pix(self, *, id_envio: str, amount: Decimal, favorecido_chave: str) -> dict:
         """Dispara o envio (Pix Out) para a chave `favorecido_chave`.
-        `id_envio` é a nossa idempotency_key -- reenviar o mesmo id_envio
-        nunca duplica o pagamento, por garantia da própria Efí."""
+        `id_envio` precisa já estar no formato exigido pela Efí (alfanumérico,
+        até 35 caracteres -- ver derive_id_envio) -- reenviar o mesmo
+        id_envio nunca duplica o pagamento, por garantia da própria Efí."""
         if not settings.EFI_PAYER_PIX_KEY:
             raise EfiConfigurationError("EFI_PAYER_PIX_KEY not configured")
 

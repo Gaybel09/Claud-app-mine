@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.efi import EfiApiError, EfiConfigurationError, efi_client
+from app.core.efi import EfiApiError, EfiConfigurationError, derive_id_envio, efi_client
 from app.models.ledger_entry import LedgerEntryType
 from app.models.user import User
 from app.models.withdrawal import Withdrawal, WithdrawalStatus
@@ -94,12 +94,16 @@ def create_withdrawal(
         pix_key=pix_key,
         status=WithdrawalStatus.PENDING,
         idempotency_key=idempotency_key,
+        # A Efí só aceita idEnvio alfanumérico (^[a-zA-Z0-9]{1,35}$);
+        # idempotency_key pode ser qualquer string (ex: um UUID com hífens),
+        # então nunca é usada direto -- ver app.core.efi.derive_id_envio.
+        efi_id_envio=derive_id_envio(idempotency_key),
     )
     db.add(withdrawal)
     db.flush()  # popula withdrawal.id antes de chamar a Efí
 
     try:
-        efi_client.send_pix(id_envio=idempotency_key, amount=amount, favorecido_chave=pix_key)
+        efi_client.send_pix(id_envio=withdrawal.efi_id_envio, amount=amount, favorecido_chave=pix_key)
         withdrawal.status = WithdrawalStatus.PROCESSING
     except (EfiApiError, EfiConfigurationError) as exc:
         logger.warning("failed to send Pix for withdrawal %s", withdrawal.id, exc_info=True)
@@ -126,6 +130,10 @@ def apply_efi_status(
     """Aplica o status reportado pela Efí (via webhook ou via reconciliação
     -- mesma lógica para as duas fontes) a um withdrawal.
 
+    `id_envio` é o idEnvio de verdade devolvido pela Efí (gnExtras.idEnvio no
+    webhook) -- ou seja, withdrawals.efi_id_envio, não idempotency_key (que
+    pode conter caracteres que a Efí não aceita -- ver derive_id_envio).
+
     Só debita o ledger quando efi_status == "REALIZADO", nunca antes.
     Idempotente: um withdrawal em estado terminal (paid/failed) ignora
     novas chamadas, então um webhook duplicado -- ou um webhook chegando
@@ -137,7 +145,7 @@ def apply_efi_status(
     guardado em withdrawals.failure_reason para diagnóstico.
     """
     withdrawal = (
-        db.query(Withdrawal).filter(Withdrawal.idempotency_key == id_envio).with_for_update().first()
+        db.query(Withdrawal).filter(Withdrawal.efi_id_envio == id_envio).with_for_update().first()
     )
     if withdrawal is None:
         return None
