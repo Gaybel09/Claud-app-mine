@@ -116,6 +116,26 @@ class EfiPixClient:
         self._access_token = response.json()["access_token"]
         return self._access_token
 
+    def check_auth(self) -> None:
+        """Autentica de verdade contra a Efí, ignorando qualquer token
+        cacheado -- usado só para diagnóstico (GET /pix/health), pra
+        confirmar client_id/secret/certificado numa chamada real, não
+        reaproveitar um token de uma verificação anterior.
+
+        Não retorna nem loga o token; levanta EfiConfigurationError ou
+        EfiApiError em caso de falha, sem incluir o corpo cru da resposta
+        da Efí na mensagem (quem chama isso é um endpoint público)."""
+        with self._http_client() as client:
+            response = client.post(
+                "/oauth/token",
+                auth=(settings.EFI_CLIENT_ID, settings.EFI_CLIENT_SECRET),
+                json={"grant_type": "client_credentials"},
+            )
+        if response.status_code != 200:
+            raise EfiApiError(response.status_code, "authentication failed")
+        if "access_token" not in response.json():
+            raise EfiApiError(response.status_code, "unexpected response shape")
+
     def send_pix(self, *, id_envio: str, amount: Decimal, favorecido_chave: str) -> dict:
         """Dispara o envio (Pix Out) para a chave `favorecido_chave`.
         `id_envio` é a nossa idempotency_key -- reenviar o mesmo id_envio

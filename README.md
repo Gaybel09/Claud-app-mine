@@ -99,6 +99,19 @@ de uma estiver setada, a prioridade é `EFI_CERTIFICATE_PEM` >
 Configure também o webhook de envio de Pix no painel da Efí apontando para
 `https://SEU_HOST/pix/webhook`.
 
+Depois de configurar tudo, confirme que a autenticação OAuth2 com a Efí está
+funcionando de verdade, sem precisar fazer um saque real:
+
+```bash
+curl https://SEU_HOST/pix/health
+```
+
+`200 {"status": "ok"}` = autenticou; `503` = falha (credenciais ausentes,
+client_id/secret errado, ou certificado inválido) -- o detalhe do erro nunca
+inclui o corpo cru da resposta da Efí, só o status HTTP. Não exige login;
+cada chamada faz uma autenticação real (não reaproveita token cacheado), só
+para diagnóstico.
+
 O saldo só é debitado quando `POST /pix/webhook` confirma `status:
 REALIZADO` -- nunca no momento de `POST /pix/withdraw`. Um worker Celery
 periódico (`pix.reconcile_pending_withdrawals`, agendado a cada 5min via

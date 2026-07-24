@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.efi import EfiApiError, EfiConfigurationError, efi_client
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.user import User
@@ -8,6 +9,25 @@ from app.modules.pix import service
 from app.schemas.pix import PixWebhookRequest, PixWithdrawRequest, WithdrawalRead
 
 router = APIRouter(prefix="/pix", tags=["pix"])
+
+
+@router.get("/health")
+def pix_health():
+    """Diagnóstico: confirma que a autenticação OAuth2 com a Efí está
+    funcionando de verdade (client_id/secret/certificado), sem precisar
+    fazer um saque real. Não expõe token nem qualquer credencial na
+    resposta -- só sucesso/falha."""
+    try:
+        efi_client.check_auth()
+    except EfiConfigurationError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Efi credentials not configured")
+    except EfiApiError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, f"Efi authentication failed (HTTP {exc.status_code})"
+        )
+    except Exception:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Unexpected error contacting Efi")
+    return {"status": "ok", "detail": "Efi OAuth2 authentication succeeded"}
 
 
 @router.post("/withdraw", response_model=WithdrawalRead, status_code=status.HTTP_201_CREATED)

@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
-from app.core import firebase
+from app.core import efi, firebase
 from app.core.efi import EfiApiError
 from app.db.session import SessionLocal
 from app.models.ledger_entry import LedgerEntry, LedgerEntryType
@@ -260,3 +260,63 @@ def test_list_withdrawals_returns_only_own(client: TestClient, monkeypatch):
     body = response.json()
     assert len(body) == 1
     assert body[0]["user_id"] == user_a_id
+
+
+def test_pix_health_ok_when_efi_auth_succeeds(client: TestClient, monkeypatch):
+    monkeypatch.setattr(efi.efi_client, "check_auth", lambda: None)
+
+    response = client.get("/pix/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+def test_pix_health_returns_503_when_efi_not_configured(client: TestClient, monkeypatch):
+    def _raise():
+        raise efi.EfiConfigurationError("EFI_CLIENT_ID/EFI_CLIENT_SECRET not configured")
+
+    monkeypatch.setattr(efi.efi_client, "check_auth", _raise)
+
+    response = client.get("/pix/health")
+    assert response.status_code == 503
+
+
+def test_pix_health_returns_503_when_efi_auth_fails(client: TestClient, monkeypatch):
+    def _raise():
+        raise efi.EfiApiError(401, "invalid_client")
+
+    monkeypatch.setattr(efi.efi_client, "check_auth", _raise)
+
+    response = client.get("/pix/health")
+    assert response.status_code == 503
+    assert "401" in response.json()["detail"]
+
+
+def test_pix_health_never_leaks_efi_response_body(client: TestClient, monkeypatch):
+    """Mesmo se a Efí devolver algo sensível no corpo do erro (ex: eco de
+    parte da credencial), a resposta do nosso endpoint nunca deve conter
+    esse texto cru -- check_auth() só propaga status_code, nunca
+    response.text."""
+
+    class _FakeResponse:
+        status_code = 401
+        text = "invalid_client_secret=SECRETXYZ-should-never-leak"
+
+        def json(self):
+            return {}
+
+    class _FakeHttpClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            return _FakeResponse()
+
+    monkeypatch.setattr(efi.efi_client, "_http_client", lambda: _FakeHttpClient())
+
+    response = client.get("/pix/health")
+    assert response.status_code == 503
+    assert "SECRETXYZ" not in response.text
+    assert "invalid_client_secret" not in response.text
