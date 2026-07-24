@@ -118,12 +118,22 @@ def run_pix_smoke_test(db: Session) -> dict:
             pix_key=settings.EFI_PAYER_PIX_KEY,
             idempotency_key=idempotency_key,
         )
-        return {"withdrawal_id": withdrawal.id, "status": withdrawal.status}
+        return {
+            "withdrawal_id": withdrawal.id,
+            "status": withdrawal.status,
+            # Motivo reportado pela Efí quando status == "failed" -- ver
+            # Withdrawal.failure_reason. Só null quando não houve falha.
+            "failure_reason": withdrawal.failure_reason,
+        }
 
     def _pix_withdrawals_list():
         withdrawals = list_user_withdrawals(db, state["user"].id)
-        final_status = withdrawals[0].status if withdrawals else None
-        return {"count": len(withdrawals), "final_status": final_status}
+        final = withdrawals[0] if withdrawals else None
+        return {
+            "count": len(withdrawals),
+            "final_status": final.status if final else None,
+            "final_failure_reason": final.failure_reason if final else None,
+        }
 
     ordered_steps = [
         ("register", _register),

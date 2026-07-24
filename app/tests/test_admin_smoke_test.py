@@ -82,8 +82,37 @@ def test_smoke_test_runs_all_steps_and_cleans_up(client: TestClient, monkeypatch
     assert Decimal(steps["wallet_balance"]["balance"]) == reward_amount
     assert steps["pix_withdraw"]["ok"] is True
     assert steps["pix_withdraw"]["status"] == "processing"
+    assert steps["pix_withdraw"]["failure_reason"] is None
     assert steps["pix_withdrawals_list"]["ok"] is True
     assert steps["pix_withdrawals_list"]["final_status"] == "processing"
+    assert steps["pix_withdrawals_list"]["final_failure_reason"] is None
+
+
+def test_smoke_test_surfaces_efi_failure_reason(client: TestClient, monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "the-real-token")
+    monkeypatch.setattr(settings, "EFI_PAYER_PIX_KEY", "payer@example.com")
+
+    def _raise(**kwargs):
+        raise pix_service.EfiApiError(422, "chave Pix do favorecido nao encontrada")
+
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", _raise)
+
+    response = client.get("/admin/smoke-test/pix", headers={ADMIN_HEADER: "the-real-token"})
+    assert response.status_code == 200
+    body = response.json()
+
+    # A falha no envio Pix não derruba o smoke test em si (o passo roda sem
+    # exceção, só o withdrawal em si fica "failed") -- por isso overall
+    # continua "ok", mas o motivo específico da Efí fica visível.
+    assert body["overall"] == "ok"
+    steps = body["steps"]
+    assert steps["pix_withdraw"]["ok"] is True
+    assert steps["pix_withdraw"]["status"] == "failed"
+    assert steps["pix_withdraw"]["failure_reason"] == "HTTP 422: chave Pix do favorecido nao encontrada"
+    assert steps["pix_withdrawals_list"]["final_status"] == "failed"
+    assert steps["pix_withdrawals_list"]["final_failure_reason"] == (
+        "HTTP 422: chave Pix do favorecido nao encontrada"
+    )
 
     # Os dados de teste não devem sobrar no banco depois da execução.
     db = SessionLocal()

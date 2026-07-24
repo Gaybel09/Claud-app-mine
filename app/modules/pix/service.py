@@ -17,6 +17,21 @@ logger = logging.getLogger(__name__)
 # depender só do webhook.
 RECONCILE_AFTER_MINUTES = 10
 
+# Tamanho máximo guardado em withdrawals.failure_reason -- a mensagem de erro
+# da Efí (corpo da resposta HTTP) não costuma conter segredo nenhum (é uma
+# descrição do motivo da rejeição, ex: chave Pix inválida, valor abaixo do
+# mínimo), mas é truncada por precaução e nunca exposta na API pública, só
+# no endpoint de diagnóstico admin/smoke-test.
+MAX_FAILURE_REASON_LENGTH = 500
+
+
+def _describe_efi_failure(exc: EfiApiError | EfiConfigurationError) -> str:
+    if isinstance(exc, EfiApiError):
+        reason = f"HTTP {exc.status_code}: {exc.message}"
+    else:
+        reason = str(exc)
+    return reason[:MAX_FAILURE_REASON_LENGTH]
+
 
 class PixError(Exception):
     """Base para os erros de negócio do módulo pix."""
@@ -86,9 +101,10 @@ def create_withdrawal(
     try:
         efi_client.send_pix(id_envio=idempotency_key, amount=amount, favorecido_chave=pix_key)
         withdrawal.status = WithdrawalStatus.PROCESSING
-    except (EfiApiError, EfiConfigurationError):
+    except (EfiApiError, EfiConfigurationError) as exc:
         logger.warning("failed to send Pix for withdrawal %s", withdrawal.id, exc_info=True)
         withdrawal.status = WithdrawalStatus.FAILED
+        withdrawal.failure_reason = _describe_efi_failure(exc)
 
     db.commit()
     db.refresh(withdrawal)
@@ -104,7 +120,9 @@ def list_user_withdrawals(db: Session, user_id: int) -> list[Withdrawal]:
     )
 
 
-def apply_efi_status(db: Session, id_envio: str, efi_status: str) -> Withdrawal | None:
+def apply_efi_status(
+    db: Session, id_envio: str, efi_status: str, failure_reason: str | None = None
+) -> Withdrawal | None:
     """Aplica o status reportado pela Efí (via webhook ou via reconciliação
     -- mesma lógica para as duas fontes) a um withdrawal.
 
@@ -113,6 +131,10 @@ def apply_efi_status(db: Session, id_envio: str, efi_status: str) -> Withdrawal 
     novas chamadas, então um webhook duplicado -- ou um webhook chegando
     depois da reconciliação já ter resolvido o mesmo saque -- não debita
     de novo.
+
+    failure_reason (opcional): motivo reportado pela Efí quando
+    efi_status == "NAO_REALIZADO" (ex: payload.gnExtras.error do webhook),
+    guardado em withdrawals.failure_reason para diagnóstico.
     """
     withdrawal = (
         db.query(Withdrawal).filter(Withdrawal.idempotency_key == id_envio).with_for_update().first()
@@ -134,6 +156,8 @@ def apply_efi_status(db: Session, id_envio: str, efi_status: str) -> Withdrawal 
         withdrawal.status = WithdrawalStatus.PAID
     elif efi_status == "NAO_REALIZADO":
         withdrawal.status = WithdrawalStatus.FAILED
+        if failure_reason:
+            withdrawal.failure_reason = failure_reason[:MAX_FAILURE_REASON_LENGTH]
     elif efi_status == "EM_PROCESSAMENTO":
         withdrawal.status = WithdrawalStatus.PROCESSING
     else:

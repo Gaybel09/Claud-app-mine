@@ -166,6 +166,15 @@ e o saldo do `reward_fund` é restaurado ao valor exato de antes -- mas o
 envio de Pix disparado é real (para `EFI_PAYER_PIX_KEY`, contra o ambiente
 sandbox da Efí).
 
+Se o saque (etapa `pix_withdraw`) terminar com `status: "failed"`, o campo
+`failure_reason` (nas etapas `pix_withdraw` e `pix_withdrawals_list`) traz o
+motivo reportado pela Efí -- ex: `"HTTP 422: chave Pix do favorecido nao
+encontrada"` (rejeição imediata no envio) ou `"PIX_KEY_INVALID: chave Pix
+inexistente"` (`gnExtras.error` de um webhook `NAO_REALIZADO`). Esse motivo
+fica salvo em `withdrawals.failure_reason` para qualquer saque, mas só é
+exposto aqui, no diagnóstico -- nunca em `POST /pix/withdraw` ou `GET
+/pix/withdrawals` (a API que o app usa).
+
 **ATENÇÃO**: isto é só para diagnóstico manual em sandbox. Remova a rota
 (ou pare de configurar `ADMIN_SMOKE_TEST_TOKEN`) antes de operar fora de
 sandbox, em produção de verdade.

@@ -70,7 +70,12 @@ def webhook(payload: PixWebhookRequest, db: Session = Depends(get_db)):
     if not id_envio:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "missing gnExtras.idEnvio")
 
-    withdrawal = service.apply_efi_status(db, id_envio=id_envio, efi_status=payload.status)
+    error = payload.gnExtras.error if payload.gnExtras else None
+    failure_reason = f"{error.codigo}: {error.motivo}" if error else None
+
+    withdrawal = service.apply_efi_status(
+        db, id_envio=id_envio, efi_status=payload.status, failure_reason=failure_reason
+    )
     if withdrawal is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "withdrawal not found")
     return {"status": "ok"}

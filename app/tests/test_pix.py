@@ -114,9 +114,19 @@ def test_withdraw_efi_send_failure_marks_failed_without_debiting(client: TestCli
     )
     assert response.status_code == 201
     assert response.json()["status"] == "failed"
+    # failure_reason não é exposto na API pública (WithdrawalRead) -- só via
+    # admin/smoke-test -- mas fica salvo na linha para diagnóstico.
+    assert "failure_reason" not in response.json()
 
     balance_response = client.get("/wallet/balance", headers=_auth_header())
     assert Decimal(str(balance_response.json()["balance"])) == Decimal("100.00")
+
+    db = SessionLocal()
+    try:
+        withdrawal = db.query(Withdrawal).filter(Withdrawal.user_id == user_id).first()
+        assert withdrawal.failure_reason == "HTTP 500: efi is down"
+    finally:
+        db.close()
 
 
 def test_webhook_confirms_and_debits_balance(client: TestClient, monkeypatch):
@@ -195,15 +205,29 @@ def test_webhook_rejected_status_marks_failed_without_debiting(client: TestClien
 
     response = client.post(
         "/pix/webhook",
-        json={"status": "NAO_REALIZADO", "gnExtras": {"idEnvio": "withdraw-webhook-fail-1"}},
+        json={
+            "status": "NAO_REALIZADO",
+            "gnExtras": {
+                "idEnvio": "withdraw-webhook-fail-1",
+                "error": {"codigo": "PIX_KEY_INVALID", "origem": "PSP", "motivo": "chave Pix inexistente"},
+            },
+        },
     )
     assert response.status_code == 200
 
     withdrawals_response = client.get("/pix/withdrawals", headers=_auth_header())
     assert withdrawals_response.json()[0]["status"] == "failed"
+    assert "failure_reason" not in withdrawals_response.json()[0]
 
     balance_response = client.get("/wallet/balance", headers=_auth_header())
     assert Decimal(str(balance_response.json()["balance"])) == Decimal("100.00")
+
+    db = SessionLocal()
+    try:
+        withdrawal = db.query(Withdrawal).filter(Withdrawal.user_id == user_id).first()
+        assert withdrawal.failure_reason == "PIX_KEY_INVALID: chave Pix inexistente"
+    finally:
+        db.close()
 
 
 def test_second_withdraw_rejected_while_first_still_pending(client: TestClient, monkeypatch):

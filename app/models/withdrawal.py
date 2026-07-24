@@ -35,6 +35,10 @@ class Withdrawal(Base):
         String(20), nullable=False, default=WithdrawalStatus.PENDING, server_default=WithdrawalStatus.PENDING, index=True
     )
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    # Motivo reportado pela Efí quando status vira failed -- só preenchido
+    # nesse caso, nunca exposto na API pública (WithdrawalRead), só no
+    # endpoint de diagnóstico admin/smoke-test.
+    failure_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
