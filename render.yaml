@@ -68,6 +68,14 @@ services:
         value: "true"
       - key: EFI_PAYER_PIX_KEY
         sync: false
+      # Protege GET /admin/smoke-test/pix (diagnóstico manual -- ver
+      # app/modules/admin/smoke_test.py e README). Sem esta variável setada,
+      # o endpoint responde 404 como se não existisse. Gere um valor forte
+      # com `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+      # e REMOVA-a (ou deixe de configurá-la) antes de operar fora de
+      # sandbox, em produção de verdade.
+      - key: ADMIN_SMOKE_TEST_TOKEN
+        sync: false
 
   - type: keyvalue
     name: cubemine-pix-redis

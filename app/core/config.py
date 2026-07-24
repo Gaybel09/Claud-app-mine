@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     # cadastrou na conta Efí para operar o Pix Out.
     EFI_PAYER_PIX_KEY: str | None = None
 
+    # Protege GET /admin/smoke-test/pix (diagnóstico manual, seção 11). Sem
+    # essa variável setada, o endpoint responde 404 como se não existisse --
+    # nunca fica acessível "por padrão". Gere com
+    # `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`.
+    ADMIN_SMOKE_TEST_TOKEN: str | None = None
+
     @property
     def DATABASE_URL(self) -> str:
         if self.DATABASE_URL_ENV:

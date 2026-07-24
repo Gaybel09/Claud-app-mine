@@ -120,3 +120,39 @@ todo saque parado em `processing` há mais de 10 minutos, para não depender
 só do webhook. Esse worker/beat ainda não está no `render.yaml` -- precisa
 de um serviço `celery -A app.workers.celery_app worker` e outro `celery -A
 app.workers.celery_app beat` rodando além da API.
+
+### Diagnóstico: `GET /admin/smoke-test/pix`
+
+Roda, dentro do próprio processo do backend (sem nenhuma chamada HTTP
+externa a si mesmo), os mesmos 7 passos do fluxo completo: cadastro → cubo
+inicial → anúncio confirmado → mineração (com o relógio adiantado
+diretamente via banco, sem esperar o ciclo real) → saldo → saque Pix → status
+final do saque. Útil para validar de ponta a ponta que a integração Pix
+sandbox da Efí está funcionando em produção, sem depender de acesso externo
+ao banco nem de esperar o ciclo de mineração de verdade.
+
+**Só fica acessível se `ADMIN_SMOKE_TEST_TOKEN` estiver configurada** -- sem
+essa variável, o endpoint responde `404` como se não existisse. Gere um
+valor forte com:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+e chame passando o mesmo valor no header `X-Admin-Token`:
+
+```bash
+curl -H "X-Admin-Token: SEU_TOKEN" https://SEU_HOST/admin/smoke-test/pix
+```
+
+A resposta traz `overall` (`"ok"`, `"failed"` ou `"not_configured"` se
+`EFI_PAYER_PIX_KEY` não estiver setada) e um `steps` com o resultado de cada
+uma das 7 etapas. Os dados criados (usuário, cubo, sessão de mineração,
+ledger entries, withdrawal) são sempre apagados ao final, sucesso ou falha,
+e o saldo do `reward_fund` é restaurado ao valor exato de antes -- mas o
+envio de Pix disparado é real (para `EFI_PAYER_PIX_KEY`, contra o ambiente
+sandbox da Efí).
+
+**ATENÇÃO**: isto é só para diagnóstico manual em sandbox. Remova a rota
+(ou pare de configurar `ADMIN_SMOKE_TEST_TOKEN`) antes de operar fora de
+sandbox, em produção de verdade.

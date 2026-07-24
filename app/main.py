@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.core.config import settings
+from app.modules.admin.router import router as admin_router
 from app.modules.ads.router import router as ads_router
 from app.modules.auth.router import router as auth_router
 from app.modules.cubes.router import router as cubes_router
@@ -18,3 +19,4 @@ app.include_router(ads_router)
 app.include_router(mining_router)
 app.include_router(cubes_router)
 app.include_router(pix_router)
+app.include_router(admin_router)
