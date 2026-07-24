@@ -145,6 +145,19 @@ e chame passando o mesmo valor no header `X-Admin-Token`:
 curl -H "X-Admin-Token: SEU_TOKEN" https://SEU_HOST/admin/smoke-test/pix
 ```
 
+Se estiver testando pelo navegador (ex: celular, sem acesso a curl/
+terminal para setar headers), o mesmo token também pode ir na query
+string, em vez do header:
+
+```
+https://SEU_HOST/admin/smoke-test/pix?token=SEU_TOKEN
+```
+
+Os dois métodos usam a mesma comparação seletiva por tempo constante
+(`secrets.compare_digest`) e o mesmo comportamento fail-closed: se nenhum
+dos dois bater (ou nenhum for enviado), a resposta é `403`; sem
+`ADMIN_SMOKE_TEST_TOKEN` configurada, é sempre `404`.
+
 A resposta traz `overall` (`"ok"`, `"failed"` ou `"not_configured"` se
 `EFI_PAYER_PIX_KEY` não estiver setada) e um `steps` com o resultado de cada
 uma das 7 etapas. Os dados criados (usuário, cubo, sessão de mineração,

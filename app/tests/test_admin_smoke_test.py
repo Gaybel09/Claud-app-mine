@@ -32,6 +32,24 @@ def test_smoke_test_rejects_wrong_token(client: TestClient, monkeypatch):
     assert response.status_code == 403
 
 
+def test_smoke_test_rejects_wrong_query_token(client: TestClient, monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "the-real-token")
+
+    response = client.get("/admin/smoke-test/pix?token=wrong-token")
+    assert response.status_code == 403
+
+
+def test_smoke_test_accepts_query_token_without_header(client: TestClient, monkeypatch):
+    # Cenário do navegador de celular: sem acesso a curl/terminal para
+    # setar headers, só a URL.
+    monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "the-real-token")
+    monkeypatch.setattr(settings, "EFI_PAYER_PIX_KEY", None)
+
+    response = client.get("/admin/smoke-test/pix?token=the-real-token")
+    assert response.status_code == 200
+    assert response.json()["overall"] == "not_configured"
+
+
 def test_smoke_test_reports_not_configured_when_no_payer_pix_key(client: TestClient, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "the-real-token")
     monkeypatch.setattr(settings, "EFI_PAYER_PIX_KEY", None)
