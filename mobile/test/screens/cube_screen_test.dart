@@ -4,6 +4,7 @@ import 'package:cubemine_pix/screens/cube/cube_screen.dart';
 import 'package:cubemine_pix/services/ads_api.dart';
 import 'package:cubemine_pix/services/cubes_api.dart';
 import 'package:cubemine_pix/services/mining_api.dart';
+import 'package:cubemine_pix/services/rewarded_ad_service.dart';
 import 'package:cubemine_pix/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -50,6 +51,7 @@ void main() {
             Provider<CubesApi>.value(value: cubesApi),
             Provider<AdsApi>.value(value: adsApi),
             Provider<MiningApi>.value(value: miningApi),
+            Provider<RewardedAdService>.value(value: FakeRewardedAdService()),
           ],
           child: MaterialApp(
             theme: AppTheme.dark,
@@ -105,6 +107,7 @@ void main() {
             Provider<CubesApi>.value(value: cubesApi),
             Provider<AdsApi>.value(value: adsApi),
             Provider<MiningApi>.value(value: miningApi),
+            Provider<RewardedAdService>.value(value: FakeRewardedAdService()),
           ],
           child: MaterialApp(
             theme: AppTheme.dark,
@@ -130,6 +133,46 @@ void main() {
       await tester.pump();
 
       expect(find.byKey(const Key('watch_ad_button')), findsOneWidget);
+    });
+
+    testWidgets('does not unlock mining when the RewardedAd is closed before the reward is earned', (tester) async {
+      final cubesApi = FakeCubesApi()
+        ..cubes = [
+          Cube(
+            id: 1,
+            userId: 1,
+            type: 'comum',
+            speed: 1.0,
+            bonusChance: 0.05,
+            acquiredAt: DateTime.now(),
+          ),
+        ];
+      final adsApi = FakeAdsApi();
+      final miningApi = FakeMiningApi();
+      final rewardedAdService = FakeRewardedAdService()..earnedReward = false;
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            Provider<CubesApi>.value(value: cubesApi),
+            Provider<AdsApi>.value(value: adsApi),
+            Provider<MiningApi>.value(value: miningApi),
+            Provider<RewardedAdService>.value(value: rewardedAdService),
+          ],
+          child: MaterialApp(theme: AppTheme.dark, home: const CubeScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('watch_ad_button')));
+      await tester.pumpAndSettle();
+
+      // O anúncio foi "fechado" sem disparar onUserEarnedReward -- nem
+      // /ads/watch nem /mining/start podem ter sido chamados.
+      expect(adsApi.confirmCallCount, 0);
+      expect(miningApi.startCallCount, 0);
+      expect(find.byKey(const Key('cube_error_text')), findsOneWidget);
+      expect(find.text('Assista o anúncio até o fim para começar a minerar.'), findsOneWidget);
     });
   });
 }

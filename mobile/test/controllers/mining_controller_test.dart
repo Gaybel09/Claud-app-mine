@@ -24,6 +24,7 @@ void main() {
     late FakeCubesApi cubesApi;
     late FakeAdsApi adsApi;
     late FakeMiningApi miningApi;
+    late FakeRewardedAdService rewardedAdService;
     late MiningController controller;
 
     setUp(() {
@@ -40,10 +41,12 @@ void main() {
         ];
       adsApi = FakeAdsApi();
       miningApi = FakeMiningApi();
+      rewardedAdService = FakeRewardedAdService();
       controller = MiningController(
         cubesApi: cubesApi,
         adsApi: adsApi,
         miningApi: miningApi,
+        rewardedAdService: rewardedAdService,
         adConfirmationPollInterval: const Duration(milliseconds: 10),
         miningStatusPollInterval: const Duration(milliseconds: 10),
         maxAdConfirmationAttempts: 5,
@@ -81,6 +84,44 @@ void main() {
       expect(controller.session?.id, 42);
       // 2 tentativas rejeitadas (ad ainda não confirmado) + 1 que teve sucesso.
       expect(miningApi.startCallCount, 3);
+    });
+
+    test('watchAd shows the RewardedAd and only confirms the ad_view after the reward is earned', () async {
+      await controller.loadCube();
+      final startedAt = DateTime.now();
+      miningApi.sessionToReturn = MiningSession(
+        id: 1,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 1,
+        startedAt: startedAt,
+        endsAt: startedAt.add(const Duration(hours: 2)),
+        status: 'running',
+      );
+
+      await controller.watchAd();
+      await _waitUntil(() => controller.stage == CubeCycleStage.mining);
+
+      expect(rewardedAdService.loadAndShowCallCount, 1);
+      expect(adsApi.confirmCallCount, 1);
+      expect(adsApi.lastConfirmedAdViewId, 1);
+      // O user_id vem do cube carregado, não de uma fonte separada.
+      expect(adsApi.lastConfirmedUserId, cubesApi.cubes.first.userId);
+    });
+
+    test('watchAd never starts mining when the user does not watch the ad to the end', () async {
+      await controller.loadCube();
+      rewardedAdService.earnedReward = false;
+
+      await controller.watchAd();
+
+      expect(controller.stage, CubeCycleStage.error);
+      expect(controller.errorMessage, contains('até o fim'));
+      // Nada do fluxo de confirmação/mineração pode ter rodado -- é
+      // exatamente a garantia de que o botão não libera a mineração sem
+      // onUserEarnedReward ter disparado de verdade.
+      expect(adsApi.confirmCallCount, 0);
+      expect(miningApi.startCallCount, 0);
     });
 
     test('gives up waiting for ad confirmation after the max attempts', () async {

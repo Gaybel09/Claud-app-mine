@@ -34,19 +34,24 @@ def watch(
     db.refresh(ad_view)
 
     # =========================================================================
-    # ATENÇÃO -- BLOCO TEMPORÁRIO DE DESENVOLVIMENTO (seção 7). Só existe
-    # porque nenhum SDK de anúncios real está integrado no app Flutter ainda
-    # (ver TODO em mobile/lib/controllers/mining_controller.dart). Com
-    # ADS_DEV_AUTO_CONFIRM ligada, confirma o ad_view na hora, sem esperar o
-    # callback SSV real de POST /ads/callback -- mesma função
-    # (apply_ad_callback) que o callback de verdade usa, só chamada direto
-    # daqui em vez de vir de uma rede de anúncios de verdade.
+    # ATENÇÃO -- BLOCO TEMPORÁRIO DE DESENVOLVIMENTO (seção 7). O app Flutter
+    # já integra o SDK real (google_mobile_ads, RewardedAd) e chama
+    # POST /ads/callback sozinho depois de onUserEarnedReward -- ver
+    # mobile/lib/controllers/mining_controller.dart. Este flag continua
+    # existindo só pra cenários sem o app de verdade rodando (ex: testes
+    # automatizados/diagnóstico no backend, como
+    # app/modules/admin/smoke_test.py), onde não há RewardedAd nenhum pra
+    # assistir. Com ADS_DEV_AUTO_CONFIRM ligada, confirma o ad_view na hora,
+    # sem esperar nenhuma chamada externa a POST /ads/callback -- mesma
+    # função (apply_ad_callback) que o callback de verdade usa, só chamada
+    # direto daqui.
     #
     # Desligada por padrão (ver app/core/config.py). NUNCA ligue em produção
     # de verdade: sem um SDK real confirmando que o anúncio foi assistido até
     # o fim, isso destrava mineração de graça pra qualquer usuário -- FALHA
     # DE SEGURANÇA GRAVE. REMOVA este bloco (e ADS_DEV_AUTO_CONFIRM) assim
-    # que o SDK real for integrado.
+    # que houver outra forma de testar sem ele (ou aceite mantê-lo só pra
+    # diagnóstico, nunca acessível em produção real).
     if settings.ADS_DEV_AUTO_CONFIRM:
         ad_view = apply_ad_callback(
             db, ad_view_id=ad_view.id, user_id=current_user.id, status=AdViewStatus.CONFIRMED
@@ -58,15 +63,20 @@ def watch(
 
 @router.post("/callback", response_model=AdViewRead)
 def callback(payload: AdCallbackRequest, db: Session = Depends(get_db)):
-    # Callback assíncrono do SDK de anúncios (SSV -- server-to-server
-    # verification), chamado pelo servidor da rede de anúncios, não pelo
-    # app -- por isso não exige o Bearer do usuário. Simulação genérica de
-    # payload por enquanto: os campos já chegam como se viessem prontos do
-    # SDK real.
+    # Pensado pra ser o callback assíncrono do SDK de anúncios (SSV --
+    # server-to-server verification), chamado pelo servidor da rede de
+    # anúncios direto, não pelo app -- por isso não exige o Bearer do
+    # usuário. NA PRÁTICA, por enquanto, quem chama isto é o próprio app
+    # Flutter (ver AdsApi.confirm em mobile/lib/services/ads_api.dart),
+    # logo depois de onUserEarnedReward do RewardedAd real -- uma
+    # confirmação client-side temporária, sem nenhuma verificação
+    # criptográfica de que o anúncio foi assistido de verdade.
     #
     # TODO (integração real): validar a assinatura/HMAC do provedor (ex: o
     # par key_id/signature do AdMob SSV) ANTES de confiar em qualquer campo
-    # do payload -- hoje aceitamos o payload como se já estivesse verificado.
+    # do payload -- hoje aceitamos o payload como se já estivesse
+    # verificado, então um cliente adulterado poderia chamar esta rota
+    # direto sem nunca ter mostrado nenhum anúncio.
     ad_view = apply_ad_callback(
         db, ad_view_id=payload.ad_view_id, user_id=payload.user_id, status=payload.status
     )

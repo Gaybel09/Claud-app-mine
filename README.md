@@ -341,30 +341,61 @@ visibilidade pro admin decidir (ex: bloquear manualmente via
 `POST /admin/users/{id}/block` depois de olhar o agrupamento) -- nada é
 bloqueado automaticamente por compartilhar device_id.
 
-## ⚠️ Modo de desenvolvimento: `ADS_DEV_AUTO_CONFIRM` (seção 7)
+## Integração de anúncios: Google Mobile Ads / RewardedAd (seção 7)
 
-O app Flutter ainda não integra nenhum SDK de anúncios real (AdMob etc.) --
-`watchAd()` (`mobile/lib/controllers/mining_controller.dart`) chama
-`POST /ads/watch` e fica esperando o `ad_view` virar `confirmed`, o que
-normalmente só aconteceria via `POST /ads/callback` (o callback SSV de uma
-rede de anúncios de verdade). Sem SDK nenhum integrado, isso nunca chega a
-acontecer sozinho -- a mineração nunca destrava.
+O app Flutter usa o SDK `google_mobile_ads` para o anúncio premiado
+(RewardedAd) que libera o ciclo de mineração. Ao tocar em "ASSISTIR
+ANÚNCIO" (`mobile/lib/controllers/mining_controller.dart`,
+`RewardedAdService` em `mobile/lib/services/rewarded_ad_service.dart`), o
+app carrega e exibe o anúncio; **só quando `onUserEarnedReward` dispara**
+(anúncio assistido até o fim de verdade) é que o app chama
+`POST /ads/watch` e `POST /ads/callback` para registrar e confirmar o
+`ad_view`, liberando `POST /mining/start`. Se o anúncio falhar ao carregar
+ou for fechado antes do fim, nada disso roda -- a mineração não é liberada.
 
-Pra testar o fluxo completo (mineração -> coleta -> saldo) sem esperar a
-integração real do SDK, existe `ADS_DEV_AUTO_CONFIRM` (`app/core/config.py`):
-com `true`, `POST /ads/watch` confirma o `ad_view` na hora, sozinho, sem
-esperar nenhum callback externo -- ver o bloco marcado em
-`app/modules/ads/router.py`.
+**App ID** (`ca-app-pub-9407999187872272~5109632072`): configurado nos
+manifests nativos (`android/app/src/main/AndroidManifest.xml`,
+`ios/Runner/Info.plist`), sempre o real -- é seguro, porque é o Ad Unit ID,
+não o App ID, que determina se o conteúdo servido é de teste ou de
+verdade.
 
-**Default `false` (fail-safe) -- e precisa continuar assim em qualquer
-deploy de produção de verdade.** Sem um SDK real confirmando que o anúncio
-foi assistido até o fim, essa flag destrava mineração de graça pra
-qualquer usuário: não é só um bug de desenvolvimento, é uma falha de
-segurança grave se vazar pra produção. Pra testar no celular contra o
-backend já deployado no Render: ligue `ADS_DEV_AUTO_CONFIRM=true`
-manualmente pelo dashboard do Render (não sincronizado pelo `render.yaml`
--- ver comentário lá), teste, e desligue (ou apague a variável) assim que
-terminar. **Remova a flag inteira** (a variável, o bloco em
-`ads/router.py`, e o comentário em `mining_controller.dart`) assim que o
-SDK de anúncios real for integrado no app -- ela não deve sobreviver além
-da fase de desenvolvimento sem SDK.
+**Ad Unit ID** (`mobile/lib/core/ads_config.dart`): por padrão usa os IDs
+de teste **oficiais do Google** (documentados em
+[developers.google.com/admob/flutter/test-ads](https://developers.google.com/admob/flutter/test-ads),
+sempre servem anúncio de teste, nunca geram risco pra conta AdMob real,
+não importa a conta/dispositivo) -- para não arriscar a conta real
+(`ca-app-pub-9407999187872272/9926844486`, bloco premiado do CubeMine
+Pix) enquanto em desenvolvimento. Para usar o Ad Unit ID real, em produção
+de verdade:
+```bash
+flutter build apk --dart-define=ADS_USE_TEST_AD_UNITS=false
+```
+
+### ⚠️ `ADS_DEV_AUTO_CONFIRM` (backend, `app/core/config.py`)
+
+O app já confirma o `ad_view` sozinho depois de assistir o anúncio de
+verdade (acima) -- não precisa mais desta flag pra testar o app
+interativamente. Ela continua existindo só para cenários **sem** o app
+rodando (testes automatizados, diagnóstico do backend como
+`admin/smoke_test.py`), onde não há RewardedAd nenhum pra assistir: com
+`true`, `POST /ads/watch` confirma o `ad_view` sozinho, sem esperar
+`POST /ads/callback`.
+
+**Default `false` (fail-safe) e precisa continuar assim em qualquer deploy
+de produção de verdade.** Sem uma confirmação real de que o anúncio foi
+assistido até o fim (seja pelo app com o SDK real, seja por uma futura
+verificação servidor-a-servidor), essa flag destrava mineração de graça
+pra qualquer usuário -- falha de segurança grave, não só um bug de
+desenvolvimento.
+
+### Endurecimento futuro (fora do escopo desta integração)
+
+`POST /ads/callback` hoje aceita a confirmação vinda do próprio app
+Flutter, sem nenhuma verificação criptográfica -- um cliente adulterado
+poderia chamar essa rota direto, sem nunca ter mostrado nenhum anúncio
+(TODO já registrado em `app/modules/ads/router.py`). O endurecimento real
+é implementar a verificação servidor-a-servidor (SSV) de verdade do
+Google (o próprio servidor do Google chama o backend direto, com
+assinatura verificável) -- quando isso acontecer, remova a chamada
+`AdsApi.confirm()` do app (marcada como temporária em
+`mobile/lib/controllers/mining_controller.dart`).

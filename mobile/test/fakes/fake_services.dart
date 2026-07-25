@@ -11,6 +11,7 @@ import 'package:cubemine_pix/services/ads_api.dart';
 import 'package:cubemine_pix/services/auth_api.dart';
 import 'package:cubemine_pix/services/cubes_api.dart';
 import 'package:cubemine_pix/services/mining_api.dart';
+import 'package:cubemine_pix/services/rewarded_ad_service.dart';
 import 'package:cubemine_pix/services/wallet_api.dart';
 
 AppUser fakeAppUser({String email = 'user@example.com'}) => AppUser(
@@ -103,11 +104,38 @@ class FakeCubesApi implements CubesApi {
 class FakeAdsApi implements AdsApi {
   int nextAdViewId = 1;
   Object? throwOnWatch;
+  Object? throwOnConfirm;
+  int confirmCallCount = 0;
+  int? lastConfirmedAdViewId;
+  int? lastConfirmedUserId;
 
   @override
   Future<AdView> watch({required String adNetwork}) async {
     if (throwOnWatch != null) throw throwOnWatch!;
     return AdView(id: nextAdViewId, status: 'pending');
+  }
+
+  @override
+  Future<AdView> confirm({required int adViewId, required int userId}) async {
+    confirmCallCount++;
+    lastConfirmedAdViewId = adViewId;
+    lastConfirmedUserId = userId;
+    if (throwOnConfirm != null) throw throwOnConfirm!;
+    return AdView(id: adViewId, status: 'confirmed');
+  }
+}
+
+/// Fake do RewardedAd real (google_mobile_ads) -- [earnedReward] controla
+/// se o "anúncio" foi assistido até o fim (default true, o caminho feliz);
+/// setar false simula o usuário fechando/pulando antes do fim.
+class FakeRewardedAdService implements RewardedAdService {
+  bool earnedReward = true;
+  int loadAndShowCallCount = 0;
+
+  @override
+  Future<bool> loadAndShow() async {
+    loadAndShowCallCount++;
+    return earnedReward;
   }
 }
 

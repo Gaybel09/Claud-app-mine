@@ -30,6 +30,14 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Google Mobile Ads (google_mobile_ads) -- App ID da conta AdMob
+             do CubeMine Pix (seção 7, RewardedAd). É seguro deixar sempre o
+             App ID real aqui mesmo em desenvolvimento: quem determina se o
+             anúncio servido é de teste ou de verdade é o Ad Unit ID (ver
+             mobile/lib/core/ads_config.dart), não o App ID. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-9407999187872272~5109632072" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

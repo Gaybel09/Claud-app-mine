@@ -8,6 +8,7 @@ import '../models/mining_session.dart';
 import '../services/ads_api.dart';
 import '../services/cubes_api.dart';
 import '../services/mining_api.dart';
+import '../services/rewarded_ad_service.dart';
 
 enum CubeCycleStage {
   idle,
@@ -20,16 +21,18 @@ enum CubeCycleStage {
   error,
 }
 
-/// Orquestra o ciclo do cubo (seção 7): assistir anúncio -> aguardar o
-/// callback assíncrono do SDK confirmar -> iniciar mineração -> aguardar
-/// ends_at -> coletar. Não faz nenhuma suposição de status local: o "pronto
-/// para coletar" só é aceito quando o backend confirma via GET
-/// /mining/status, nunca por cálculo otimista do relógio do aparelho.
+/// Orquestra o ciclo do cubo (seção 7): assistir o RewardedAd (Google
+/// Mobile Ads) até o fim -> registrar e confirmar o ad_view no backend ->
+/// aguardar a confirmação liberar POST /mining/start -> aguardar ends_at ->
+/// coletar. Não faz nenhuma suposição de status local: o "pronto para
+/// coletar" só é aceito quando o backend confirma via GET /mining/status,
+/// nunca por cálculo otimista do relógio do aparelho.
 class MiningController extends ChangeNotifier {
   MiningController({
     required this.cubesApi,
     required this.adsApi,
     required this.miningApi,
+    required this.rewardedAdService,
     this.adConfirmationPollInterval = const Duration(seconds: 2),
     this.miningStatusPollInterval = const Duration(seconds: 5),
     this.maxAdConfirmationAttempts = 30,
@@ -38,6 +41,7 @@ class MiningController extends ChangeNotifier {
   final CubesApi cubesApi;
   final AdsApi adsApi;
   final MiningApi miningApi;
+  final RewardedAdService rewardedAdService;
   final Duration adConfirmationPollInterval;
   final Duration miningStatusPollInterval;
   final int maxAdConfirmationAttempts;
@@ -70,20 +74,30 @@ class MiningController extends ChangeNotifier {
     errorMessage = null;
     notifyListeners();
 
+    // RewardedAd real (google_mobile_ads) -- só retorna true quando o
+    // usuário assistiu até o fim de verdade (onUserEarnedReward do SDK do
+    // Google disparou). Antes disso, nada abaixo roda: o botão "ASSISTIR
+    // ANÚNCIO" não inicia a mineração sem o anúncio ter sido concluído.
+    final earnedReward = await rewardedAdService.loadAndShow();
+    if (!earnedReward) {
+      stage = CubeCycleStage.error;
+      errorMessage = 'Assista o anúncio até o fim para começar a minerar.';
+      notifyListeners();
+      return;
+    }
+
     try {
-      // TODO: plugar aqui a exibição real do SDK de anúncio (AdMob etc.) --
-      // este app ainda não mostra nenhum anúncio de verdade.
-      //
-      // ATENÇÃO -- MODO DE DESENVOLVIMENTO TEMPORÁRIO: até esse SDK real
-      // ser integrado, o backend pode confirmar o ad_view sozinho, sem
-      // esperar nenhum callback SSV real de rede de anúncios (flag
-      // ADS_DEV_AUTO_CONFIRM em app/core/config.py, do lado do backend) --
-      // é por isso que o polling logo abaixo tende a resolver quase na
-      // hora hoje. Isso é uma FALHA DE SEGURANÇA GRAVE se ficar ligado em
-      // produção de verdade (mineração liberada de graça, sem nenhum
-      // anúncio sendo assistido) -- remova esse flag no backend assim que
-      // este TODO acima for resolvido.
-      final adView = await adsApi.watch(adNetwork: 'generic_ssv');
+      final adView = await adsApi.watch(adNetwork: 'admob_rewarded');
+
+      // ATENÇÃO -- CONFIRMAÇÃO TEMPORÁRIA VIA CLIENTE (ver docstring de
+      // AdsApi.confirm): o app assistiu o anúncio até o fim de verdade,
+      // mas quem confirma o ad_view pro backend ainda é o próprio app, não
+      // a verificação servidor-a-servidor (SSV) real do Google. Remova
+      // esta chamada quando o SSV real estiver implementado -- o polling
+      // logo abaixo já está pronto pra esperar uma confirmação que chegue
+      // de forma assíncrona/externa, como vai acontecer com SSV de verdade.
+      await adsApi.confirm(adViewId: adView.id, userId: currentCube.userId);
+
       stage = CubeCycleStage.waitingAdConfirmation;
       notifyListeners();
 

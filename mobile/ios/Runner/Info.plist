@@ -24,6 +24,17 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- Google Mobile Ads (google_mobile_ads) -- App ID da conta AdMob do
+	     CubeMine Pix (seção 7, RewardedAd). Seguro deixar sempre o App ID
+	     real aqui mesmo em desenvolvimento -- é o Ad Unit ID (ver
+	     mobile/lib/core/ads_config.dart), não o App ID, que determina se o
+	     anúncio servido é de teste ou de verdade.
+	     NOTA: antes de publicar de verdade na App Store, faltam ainda
+	     SKAdNetworkItems e NSUserTrackingUsageDescription (App Tracking
+	     Transparency) -- não incluídos aqui, fora do escopo desta
+	     integração inicial; a build Android (CI atual) não precisa disso. -->
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-9407999187872272~5109632072</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

@@ -8,6 +8,7 @@ import '../../models/mining_session.dart';
 import '../../services/ads_api.dart';
 import '../../services/cubes_api.dart';
 import '../../services/mining_api.dart';
+import '../../services/rewarded_ad_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/cube_visual.dart';
 import '../../widgets/neon_progress_bar.dart';
@@ -40,6 +41,7 @@ class _CubeScreenState extends State<CubeScreen> {
       cubesApi: context.read<CubesApi>(),
       adsApi: context.read<AdsApi>(),
       miningApi: context.read<MiningApi>(),
+      rewardedAdService: context.read<RewardedAdService>(),
       adConfirmationPollInterval: widget.adConfirmationPollInterval,
       miningStatusPollInterval: widget.miningStatusPollInterval,
     )..addListener(_onControllerChanged);
