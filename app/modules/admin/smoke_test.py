@@ -34,7 +34,8 @@ from app.models.reward_fund import SINGLETON_ID, RewardFund
 from app.models.user import User
 from app.models.withdrawal import Withdrawal
 from app.modules.ads.service import apply_ad_callback
-from app.modules.mining.service import MAX_REWARD, collect_mining_session, start_mining_session
+from app.modules.mining.service import collect_mining_session, start_mining_session
+from app.modules.reward.service import MAX_REWARD
 from app.modules.pix.service import create_withdrawal, list_user_withdrawals
 from app.modules.wallet.service import compute_balance
 from app.workers.tasks import reconcile_withdrawal

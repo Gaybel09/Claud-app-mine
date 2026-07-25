@@ -1,5 +1,4 @@
 import logging
-import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -11,17 +10,12 @@ from app.models.ledger_entry import LedgerEntry, LedgerEntryType
 from app.models.mining_session import MiningSession, MiningSessionStatus
 from app.models.reward_fund import SINGLETON_ID, RewardFund
 from app.modules.ads.service import is_ad_confirmed
+from app.modules.reward.service import get_current_value_per_session
 from app.modules.wallet.service import create_ledger_entry
 
 logger = logging.getLogger(__name__)
 
 MINING_SESSION_DURATION = timedelta(hours=2)
-
-# TODO: substituir por uma tabela de recompensas real por raridade de cubo
-# quando as regras de produto forem definidas -- por ora é um sorteio
-# uniforme simples só para validar o fluxo transacional do ciclo (seção 7).
-MIN_REWARD = Decimal("0.10")
-MAX_REWARD = Decimal("1.00")
 
 # Seção 8: "soma_esperada_de_payouts <= fundo.balance * margem_de_segurança".
 REWARD_FUND_SAFETY_MARGIN = Decimal("0.9")
@@ -127,11 +121,6 @@ def get_mining_status(db: Session, user_id: int, session_id: int) -> MiningStatu
     )
 
 
-def _draw_reward_amount() -> Decimal:
-    raw = random.uniform(float(MIN_REWARD), float(MAX_REWARD))
-    return Decimal(str(round(raw, 2)))
-
-
 def collect_mining_session(db: Session, user_id: int, session_id: int) -> tuple[MiningSession, Decimal]:
     # Seção 7, passo 5: lock de linha na sessão antes de qualquer decisão.
     session = (
@@ -166,7 +155,10 @@ def collect_mining_session(db: Session, user_id: int, session_id: int) -> tuple[
 
     reward_fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).with_for_update().first()
 
-    reward_amount = _draw_reward_amount()
+    # Seção 7: valor vigente da reward_config (recalculado 1x/dia a partir
+    # do eCPM real do AdMob -- ver app/modules/reward/service.py), não mais
+    # um sorteio aleatório fixo.
+    reward_amount = get_current_value_per_session(db)
     max_allowed = reward_fund.balance * REWARD_FUND_SAFETY_MARGIN
     if reward_amount > max_allowed:
         # Falha segura: nada foi mutado ainda (nem reward_fund, nem a

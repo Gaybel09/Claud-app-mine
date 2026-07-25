@@ -3,11 +3,13 @@ import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.core.admob import AdMobApiError, AdMobConfigurationError
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
 from app.modules.admin.register_webhook import run_register_efi_webhook
 from app.modules.admin.smoke_test import run_pix_smoke_test
+from app.modules.reward.service import update_reward_config_from_admob
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -65,6 +67,31 @@ def register_efi_webhook():
     de qualquer deploy de produção de verdade, fora de sandbox.
     """
     return run_register_efi_webhook()
+
+
+@router.get("/update-reward-config", dependencies=[Depends(require_admin_token)])
+def update_reward_config(db: Session = Depends(get_db)):
+    """Roda manualmente a mesma lógica do worker diário
+    update_reward_config (ver app/modules/reward/service.py), sem esperar o
+    agendamento do Celery Beat (6h) -- útil para validar a integração com a
+    AdMob Reporting API sem esperar até o dia seguinte.
+
+    APENAS PARA DIAGNÓSTICO. Escreve de verdade na reward_config (não é
+    revertido ao final, ao contrário de /admin/smoke-test/pix) -- é
+    exatamente o efeito que o worker teria, só disparado na hora.
+    """
+    try:
+        config = update_reward_config_from_admob(db)
+    except AdMobConfigurationError as exc:
+        return {"ok": False, "error": str(exc)}
+    except AdMobApiError as exc:
+        return {"ok": False, "error": exc.message, "status_code": exc.status_code}
+    return {
+        "ok": True,
+        "value_per_session": str(config.value_per_session),
+        "avg_ecpm": str(config.avg_ecpm) if config.avg_ecpm is not None else None,
+        "updated_at": config.updated_at.isoformat(),
+    }
 
 
 @router.post("/promote-user/{user_id}", dependencies=[Depends(require_admin_token)])

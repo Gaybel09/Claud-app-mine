@@ -3,10 +3,12 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core.admob import AdMobApiError, AdMobConfigurationError
 from app.core.efi import EfiApiError, EfiConfigurationError, efi_client
 from app.db.session import SessionLocal
 from app.models.withdrawal import Withdrawal, WithdrawalStatus
 from app.modules.pix.service import RECONCILE_AFTER_MINUTES, apply_efi_status
+from app.modules.reward.service import update_reward_config_from_admob
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -56,5 +58,25 @@ def reconcile_pending_withdrawals() -> None:
         )
         for withdrawal in stuck:
             reconcile_withdrawal(db, withdrawal)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="reward.update_reward_config")
+def update_reward_config() -> None:
+    """Roda 1x/dia (ver beat_schedule em app/workers/celery_app.py): busca o
+    eCPM médio do dia anterior no bloco de anúncios premiado via AdMob
+    Reporting API e atualiza o valor de recompensa por sessão vigente
+    (seção 7) -- ver app/modules/reward/service.py.
+
+    Não levanta em caso de falha (credenciais da AdMob não configuradas,
+    erro de rede/API) -- só loga, igual ao worker de reconciliação de saques
+    acima, para uma falha num dia não travar o scheduler nem os dias
+    seguintes."""
+    db = SessionLocal()
+    try:
+        update_reward_config_from_admob(db)
+    except (AdMobConfigurationError, AdMobApiError):
+        logger.warning("failed to update reward_config from AdMob", exc_info=True)
     finally:
         db.close()

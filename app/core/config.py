@@ -91,6 +91,29 @@ class Settings(BaseSettings):
     # =========================================================================
     ADS_DEV_AUTO_CONFIRM: bool = False
 
+    # Integração com a AdMob Reporting API (seção 7): valor de recompensa por
+    # sessão variável, baseado no eCPM real do bloco premiado -- ver
+    # app/core/admob.py e app/modules/reward/service.py. Credenciais de uma
+    # conta OAuth do Google Cloud vinculada à mesma conta AdMob (Console:
+    # ative "AdMob API" e crie um OAuth client -- ver README).
+    ADMOB_CLIENT_ID: str | None = None
+    ADMOB_CLIENT_SECRET: str | None = None
+    ADMOB_REFRESH_TOKEN: str | None = None
+    # ID da conta AdMob (formato "pub-XXXXXXXXXXXXXXXX", sem a parte do Ad
+    # Unit) -- usado como {publisherId} em accounts/{publisherId} na
+    # Reporting API. Ver painel AdMob > Configurações da conta > ID do editor.
+    ADMOB_PUBLISHER_ID: str | None = None
+    # ID numérico do bloco de anúncios premiado, como a Reporting API espera
+    # (só o número depois da barra do Ad Unit ID completo do SDK, ex:
+    # "ca-app-pub-9407999187872272/9926844486" -> "9926844486").
+    ADMOB_AD_UNIT_ID: str = "9926844486"
+
+    # Fração do eCPM médio repassada como recompensa por sessão (seção 7):
+    # valor_por_sessao = (eCPM_medio * ADMOB_REWARD_MARGIN) / 1000. Ex: 0.5
+    # repassa metade do eCPM médio, mantendo a outra metade como margem de
+    # segurança (custo de infra, inadimplência do fundo, etc).
+    ADMOB_REWARD_MARGIN: Decimal = Decimal("0.5")
+
     @property
     def DATABASE_URL(self) -> str:
         if self.DATABASE_URL_ENV:

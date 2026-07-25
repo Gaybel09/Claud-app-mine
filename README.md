@@ -399,3 +399,60 @@ Google (o próprio servidor do Google chama o backend direto, com
 assinatura verificável) -- quando isso acontecer, remova a chamada
 `AdsApi.confirm()` do app (marcada como temporária em
 `mobile/lib/controllers/mining_controller.dart`).
+
+## Valor de recompensa variável por sessão (seção 7)
+
+O valor creditado ao final de cada sessão de mineração (`POST
+/mining/collect`) não é mais um sorteio aleatório fixo -- vem da tabela
+singleton `reward_config` (`app/models/reward_config.py`), recalculada 1x
+por dia a partir do eCPM médio real do bloco de anúncios premiado no
+AdMob:
+
+```
+valor_por_sessão = clamp(eCPM_médio * ADMOB_REWARD_MARGIN / 1000, R$0,10, R$1,00)
+```
+
+- **Worker diário** (`reward.update_reward_config`, agendado às 6h UTC em
+  `app/workers/celery_app.py`): busca o eCPM médio do dia anterior via
+  AdMob Reporting API (`app/core/admob.py`) e atualiza `reward_config`. Se a
+  AdMob não tiver dado para o dia, mantém o valor vigente inalterado (não
+  zera). Lógica em `app/modules/reward/service.py`.
+- **Diagnóstico manual**: `GET /admin/update-reward-config` (mesma proteção
+  por `ADMIN_SMOKE_TEST_TOKEN` dos outros diagnósticos) roda a mesma lógica
+  na hora, sem esperar o agendamento.
+- **`GET /reward/current`** (público, sem autenticação): devolve
+  `value_per_session`, `avg_ecpm` e `updated_at` vigentes, para o app
+  mostrar antes de minerar.
+- **Onde é creditado**: continua em `collect_mining_session` (fim das 2h de
+  mineração), como antes -- só o valor mudou de um sorteio aleatório para o
+  valor vigente da `reward_config`. `POST /ads/callback` continua só
+  confirmando o `ad_view`, sem nenhum movimento de saldo.
+
+### Credenciais da AdMob Reporting API
+
+A AdMob API não aceita conta de serviço pura -- precisa de um OAuth client
+do Google Cloud (mesmo projeto/conta vinculado ao AdMob) e um
+`refresh_token` obtido uma vez via consentimento OAuth de um usuário com
+acesso à conta AdMob:
+
+- `ADMOB_CLIENT_ID` / `ADMOB_CLIENT_SECRET`: credenciais do OAuth client
+  (Google Cloud Console > APIs e Serviços > Credenciais, com a "AdMob API"
+  habilitada no projeto).
+- `ADMOB_REFRESH_TOKEN`: obtido uma vez via fluxo de consentimento OAuth
+  (escopo `https://www.googleapis.com/auth/admob.readonly`).
+- `ADMOB_PUBLISHER_ID`: ID da conta AdMob (formato `pub-XXXXXXXXXXXXXXXX`,
+  painel AdMob > Configurações da conta).
+- `ADMOB_AD_UNIT_ID`: ID numérico do bloco premiado, como a Reporting API
+  espera -- só o número depois da barra do Ad Unit ID completo do SDK
+  (`ca-app-pub-9407999187872272/9926844486` -> `9926844486`, já é o
+  default).
+
+Sem essas variáveis configuradas, o worker diário loga um aviso e mantém o
+valor vigente (fail-safe); `GET /admin/update-reward-config` reporta
+`{"ok": false, "error": "..."}` em vez de derrubar a rota.
+
+**TODO (fora do escopo desta integração):** este sandbox não tem acesso de
+rede a `googleapis.com` para validar `networkReport:generate` contra a API
+viva -- confira a documentação oficial
+([developers.google.com/admob/api](https://developers.google.com/admob/api))
+antes de operar em produção, especialmente o formato exato da resposta.
