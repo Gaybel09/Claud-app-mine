@@ -1,0 +1,87 @@
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
+from app.core.security import get_current_admin_user
+from app.db.session import get_db
+from app.models.withdrawal import WithdrawalStatus
+from app.modules.admin_panel import service
+from app.modules.pix import service as pix_service
+from app.schemas.admin import (
+    AdminFundRead,
+    AdminUserListRead,
+    AdminWithdrawalListRead,
+    AdminWithdrawalRead,
+)
+
+router = APIRouter(
+    prefix="/admin", tags=["admin-panel"], dependencies=[Depends(get_current_admin_user)]
+)
+
+
+@router.get("/users", response_model=AdminUserListRead)
+def list_users(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    items, total = service.list_users(db, page=page, page_size=page_size)
+    return AdminUserListRead(items=items, page=page, page_size=page_size, total=total)
+
+
+@router.post("/users/{user_id}/block")
+def block_user(user_id: int, db: Session = Depends(get_db)):
+    try:
+        user = service.block_user(db, user_id)
+    except service.UserNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+    return {"id": user.id, "is_blocked": user.is_blocked}
+
+
+@router.post("/users/{user_id}/unblock")
+def unblock_user(user_id: int, db: Session = Depends(get_db)):
+    try:
+        user = service.unblock_user(db, user_id)
+    except service.UserNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+    return {"id": user.id, "is_blocked": user.is_blocked}
+
+
+@router.get("/withdrawals", response_model=AdminWithdrawalListRead)
+def list_withdrawals(
+    status_filter: str | None = Query(None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    if status_filter is not None and status_filter not in WithdrawalStatus.ALL:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"invalid status -- must be one of {', '.join(WithdrawalStatus.ALL)}",
+        )
+    items, total = service.list_withdrawals(
+        db, page=page, page_size=page_size, status_filter=status_filter
+    )
+    return AdminWithdrawalListRead(items=items, page=page, page_size=page_size, total=total)
+
+
+@router.post("/withdrawals/{withdrawal_id}/approve", response_model=AdminWithdrawalRead)
+def approve_withdrawal(withdrawal_id: int, db: Session = Depends(get_db)):
+    """Confirmação manual de pagamento -- ver docstring de
+    pix.service.admin_approve_withdrawal para quando isso realmente se
+    aplica (o fluxo normal é automático via webhook/reconciliação da Efí).
+    """
+    try:
+        withdrawal = pix_service.admin_approve_withdrawal(db, withdrawal_id)
+    except pix_service.WithdrawalNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "withdrawal not found")
+    except pix_service.WithdrawalNotApprovableError:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "withdrawal is already failed -- only pending/processing withdrawals can be approved",
+        )
+    return withdrawal
+
+
+@router.get("/fund", response_model=AdminFundRead)
+def fund_status(db: Session = Depends(get_db)):
+    return service.get_fund_status(db)

@@ -45,6 +45,25 @@ class UserNotFoundError(PixError):
     pass
 
 
+class WithdrawalNotFoundError(PixError):
+    pass
+
+
+class WithdrawalNotApprovableError(PixError):
+    pass
+
+
+def _mark_paid(db: Session, withdrawal: Withdrawal) -> None:
+    create_ledger_entry(
+        db,
+        user_id=withdrawal.user_id,
+        type=LedgerEntryType.WITHDRAWAL,
+        amount=-withdrawal.amount,
+        reference_id=f"withdrawal:{withdrawal.id}",
+    )
+    withdrawal.status = WithdrawalStatus.PAID
+
+
 def create_withdrawal(
     db: Session,
     user_id: int,
@@ -154,14 +173,7 @@ def apply_efi_status(
         return withdrawal
 
     if efi_status == "REALIZADO":
-        create_ledger_entry(
-            db,
-            user_id=withdrawal.user_id,
-            type=LedgerEntryType.WITHDRAWAL,
-            amount=-withdrawal.amount,
-            reference_id=f"withdrawal:{withdrawal.id}",
-        )
-        withdrawal.status = WithdrawalStatus.PAID
+        _mark_paid(db, withdrawal)
     elif efi_status == "NAO_REALIZADO":
         withdrawal.status = WithdrawalStatus.FAILED
         if failure_reason:
@@ -171,6 +183,44 @@ def apply_efi_status(
     else:
         return withdrawal
 
+    db.commit()
+    db.refresh(withdrawal)
+    return withdrawal
+
+
+def admin_approve_withdrawal(db: Session, withdrawal_id: int) -> Withdrawal:
+    """Confirma manualmente que um saque foi pago (painel admin, seção 10).
+
+    O fluxo normal é 100% automático: a Efí confirma via webhook
+    (POST /pix/webhook) ou, se o webhook não chegar, o worker periódico de
+    reconciliação (pix.reconcile_pending_withdrawals) consulta o status
+    direto na Efí a cada 5min para todo saque parado em "processing" há
+    mais de RECONCILE_AFTER_MINUTES. Isto aqui é só a via de escape manual
+    para quando as duas falharem (ex: Efí fora do ar por um tempo
+    prolongado, ou algum outro motivo deixou um saque específico preso) e
+    um admin já confirmou de forma independente -- olhando o extrato/
+    dashboard da própria Efí -- que a transferência realmente aconteceu.
+
+    NUNCA deve ser usada para "aprovar" um saque que ainda não foi
+    confirmado de verdade na Efí: debita o saldo do usuário exatamente como
+    uma confirmação real (mesmo _mark_paid de apply_efi_status), então
+    aprovar um saque que na verdade falhou deixa o saldo do usuário
+    incorreto.
+
+    Idempotente (um withdrawal já pago não é debitado de novo); levanta
+    WithdrawalNotFoundError se o id não existir, ou
+    WithdrawalNotApprovableError se o saque já estiver em outro estado
+    terminal (failed) -- só pending/processing podem ser aprovados.
+    """
+    withdrawal = db.query(Withdrawal).filter(Withdrawal.id == withdrawal_id).with_for_update().first()
+    if withdrawal is None:
+        raise WithdrawalNotFoundError()
+    if withdrawal.status == WithdrawalStatus.PAID:
+        return withdrawal
+    if withdrawal.status not in (WithdrawalStatus.PENDING, WithdrawalStatus.PROCESSING):
+        raise WithdrawalNotApprovableError()
+
+    _mark_paid(db, withdrawal)
     db.commit()
     db.refresh(withdrawal)
     return withdrawal

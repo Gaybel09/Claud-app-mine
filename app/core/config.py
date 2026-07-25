@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -66,6 +68,11 @@ class Settings(BaseSettings):
     # (PUBLIC_BASE_URL + "/pix/webhook"). Não é secreta; o default já é o
     # host atual no Render.
     PUBLIC_BASE_URL: str = "https://cubemine-pix-api.onrender.com"
+
+    # GET /admin/fund (painel admin, seção 10) sinaliza low_balance_alert
+    # quando reward_fund.balance cai abaixo deste valor -- ajuste conforme o
+    # volume esperado de recompensas.
+    ADMIN_FUND_LOW_THRESHOLD: Decimal = Decimal("50.00")
 
     @property
     def DATABASE_URL(self) -> str:

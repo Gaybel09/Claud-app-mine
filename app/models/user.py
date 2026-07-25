@@ -32,3 +32,8 @@ class User(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # Acesso ao painel admin (seção 10) -- GET/POST /admin/users,
+    # /admin/withdrawals, /admin/fund. Sem jeito de um admin promover outro
+    # pelo próprio painel ainda; promoção manual via
+    # POST /admin/promote-user/{id} (protegida por ADMIN_SMOKE_TEST_TOKEN).
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

@@ -33,3 +33,13 @@ def get_current_user(
     if user.is_blocked:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "User is blocked")
     return user
+
+
+def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    """Painel admin (seção 10) -- exige login Firebase normal (get_current_user,
+    já rejeita usuário bloqueado) e, além disso, is_admin=true. Não tem
+    relação com ADMIN_SMOKE_TEST_TOKEN (esse é só para os diagnósticos
+    manuais em app/modules/admin/)."""
+    if not current_user.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "admin access required")
+    return current_user

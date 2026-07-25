@@ -73,15 +73,21 @@ services:
       # se o host do serviço mudar (ex: domínio customizado).
       - key: PUBLIC_BASE_URL
         value: https://cubemine-pix-api.onrender.com
-      # Protege GET /admin/smoke-test/pix e GET /admin/register-efi-webhook
-      # (diagnóstico manual -- ver app/modules/admin/ e README). Sem esta
-      # variável setada, as rotas respondem 404 como se não existissem. Gere
-      # um valor forte com
-      # `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` e
-      # REMOVA-a (ou deixe de configurá-la) antes de operar fora de sandbox,
-      # em produção de verdade.
+      # Protege GET /admin/smoke-test/pix, GET /admin/register-efi-webhook e
+      # POST /admin/promote-user|demote-user (ver app/modules/admin/ e
+      # README). Sem esta variável setada, as rotas respondem 404 como se
+      # não existissem. Gere um valor forte com
+      # `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`.
+      # smoke-test/register-webhook são só diagnóstico de sandbox
+      # (desative antes de produção de verdade); promote-user/demote-user
+      # continuam necessários -- é a única forma de criar o primeiro admin
+      # do painel (GET/POST /admin/users, /admin/withdrawals, /admin/fund).
       - key: ADMIN_SMOKE_TEST_TOKEN
         sync: false
+      # Painel admin -- GET /admin/fund sinaliza low_balance_alert quando
+      # reward_fund.balance cai abaixo deste valor. Não é secreta.
+      - key: ADMIN_FUND_LOW_THRESHOLD
+        value: "50.00"
 
   - type: keyvalue
     name: cubemine-pix-redis

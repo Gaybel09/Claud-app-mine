@@ -248,3 +248,47 @@ chamada real de escrita na conta Efí (registra/sobrescreve a URL de webhook
 associada à chave). Remova a rota (ou pare de configurar
 `ADMIN_SMOKE_TEST_TOKEN`) antes de operar fora de sandbox, em produção de
 verdade.
+
+## Painel admin (seção 10)
+
+Visão básica de usuários, saques e fundo de recompensas, para operação
+manual. Ao contrário dos diagnósticos de sandbox acima, exige login Firebase
+normal de um usuário com `is_admin=true` -- não usa `ADMIN_SMOKE_TEST_TOKEN`.
+
+**Promovendo o primeiro admin**: não existe (ainda) um jeito de um admin
+promover outro pelo próprio painel, então a promoção é manual, via
+`POST /admin/promote-user/{user_id}` -- protegida pelo mesmo
+`ADMIN_SMOKE_TEST_TOKEN` das rotas de diagnóstico, por conveniência (reaproveita
+a mesma infra de proteção já existente). Ao contrário delas, esta rota **não**
+é "só sandbox": continua sendo a única forma de bootstrapar o primeiro admin
+até existir um fluxo de convite de verdade.
+
+```bash
+curl -X POST -H "X-Admin-Token: SEU_TOKEN" https://SEU_HOST/admin/promote-user/42
+```
+
+`POST /admin/demote-user/{user_id}` reverte, com a mesma proteção.
+
+### Rotas do painel (exigem `Authorization: Bearer <token Firebase>` de um admin)
+
+| Rota | O que faz |
+|---|---|
+| `GET /admin/users?page=&page_size=` | Lista usuários com saldo atual, data de cadastro, `is_blocked`, `is_admin` -- paginado |
+| `POST /admin/users/{id}/block` | Bloqueia um usuário (`is_blocked=true`) -- a partir daí, todo endpoint autenticado dele responde `403` |
+| `POST /admin/users/{id}/unblock` | Desbloqueia |
+| `GET /admin/withdrawals?status=&page=&page_size=` | Lista **todos** os saques do sistema (não só de um usuário), com `failure_reason` visível e filtro opcional por `status` (`pending`/`processing`/`paid`/`failed`) -- paginado |
+| `POST /admin/withdrawals/{id}/approve` | Confirma manualmente que um saque foi pago -- ver aviso abaixo |
+| `GET /admin/fund` | `balance`, `total_in`, `total_out` do `reward_fund`, e `low_balance_alert` (`true` se `balance < ADMIN_FUND_LOW_THRESHOLD`, configurável, default `50.00`) |
+
+**Sobre `POST /admin/withdrawals/{id}/approve`**: o fluxo normal de
+confirmação é 100% automático -- via webhook (`POST /pix/webhook`) ou, se
+ele não chegar, via reconciliação periódica (`pix.reconcile_pending_withdrawals`,
+a cada 5min, para saques parados em `processing` há mais de
+`RECONCILE_AFTER_MINUTES`). Este endpoint é só a via de escape manual para
+quando as duas falharem (ex: Efí fora do ar por um tempo prolongado) **e**
+um admin já confirmou de forma independente, olhando o extrato/dashboard da
+própria Efí, que a transferência realmente aconteceu -- ele debita o saldo
+do usuário exatamente como uma confirmação real chegaria, então aprovar um
+saque que na verdade falhou deixa o saldo incorreto. Idempotente (`200` sem
+debitar de novo se já estiver `paid`); `400` se o saque já estiver `failed`
+(estado terminal que não pode virar `paid`); `404` se o id não existir.
