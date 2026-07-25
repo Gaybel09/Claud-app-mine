@@ -486,3 +486,46 @@ def test_register_webhook_ignores_cached_token_and_requests_a_fresh_one(monkeypa
     assert result == {"webhookUrl": "https://host/pix/webhook"}
     # O cache é atualizado com o token novo, não deixado com o antigo.
     assert client._access_token == "fresh-token-1"
+
+
+def test_register_webhook_sends_skip_mtls_checking_header(monkeypatch):
+    """A Efí, por padrão, exige que o próprio servidor de webhook valide o
+    certificado mTLS dela nas notificações recebidas -- não temos isso
+    configurado (hospedado no Render), então o cadastro do webhook precisa
+    ir com x-skip-mtls-checking: true (dev.efipay.com.br/docs/api-pix/
+    webhooks#entendendo-o-padrão-mtls), senão a Efí espera validar mTLS de
+    entrada que nunca vai bater."""
+    monkeypatch.setattr(efi.settings, "EFI_CLIENT_ID", "id")
+    monkeypatch.setattr(efi.settings, "EFI_CLIENT_SECRET", "secret")
+
+    client = efi.EfiPixClient()
+    captured_headers = {}
+
+    class _FakeResponse:
+        def __init__(self, payload):
+            self.status_code = 200
+            self._payload = payload
+            self.text = str(payload)
+
+        def json(self):
+            return self._payload
+
+    class _FakeHttpClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, path, **kwargs):
+            return _FakeResponse({"access_token": "token"})
+
+        def put(self, path, **kwargs):
+            captured_headers.update(kwargs["headers"])
+            return _FakeResponse({"webhookUrl": kwargs["json"]["webhookUrl"]})
+
+    monkeypatch.setattr(client, "_http_client", lambda: _FakeHttpClient())
+
+    client.register_webhook(pix_key="payer@example.com", webhook_url="https://host/pix/webhook")
+
+    assert captured_headers["x-skip-mtls-checking"] == "true"

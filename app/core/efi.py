@@ -104,6 +104,16 @@ def _resolve_certificate_path() -> str:
 
 
 class EfiPixClient:
+    # A Efí exige por padrão que o próprio servidor de webhook valide o
+    # certificado mTLS dela nas notificações recebidas (ver
+    # dev.efipay.com.br/docs/api-pix/webhooks#entendendo-o-padrão-mtls).
+    # Não temos essa validação configurada (hospedado no Render, sem esse
+    # setup) -- "true" avisa a Efí para não exigir mTLS de entrada nas
+    # chamadas que ela fizer pro nosso webhook. Fixo por enquanto (não
+    # depende de env var); se um dia o servidor passar a validar mTLS de
+    # entrada de verdade, troque para "false".
+    WEBHOOK_SKIP_MTLS_CHECKING = "true"
+
     def __init__(self) -> None:
         self._access_token: str | None = None
 
@@ -220,7 +230,10 @@ class EfiPixClient:
         with self._http_client() as client:
             response = client.put(
                 f"/v2/webhook/{pix_key}",
-                headers={"Authorization": f"Bearer {token}"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "x-skip-mtls-checking": self.WEBHOOK_SKIP_MTLS_CHECKING,
+                },
                 json={"webhookUrl": webhook_url},
             )
         if response.status_code not in (200, 201):

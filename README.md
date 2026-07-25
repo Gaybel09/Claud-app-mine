@@ -208,6 +208,17 @@ para `EFI_PAYER_PIX_KEY`, apontando para `PUBLIC_BASE_URL` + `/pix/webhook`
 painel da Efí (Webhooks). Usa as mesmas credenciais já configuradas
 (`EFI_CLIENT_ID`/`EFI_CLIENT_SECRET`/certificado mTLS).
 
+A chamada sempre inclui `x-skip-mtls-checking: true` -- por padrão, a Efí
+exige que o próprio servidor de webhook valide o certificado mTLS dela nas
+notificações recebidas ([dev.efipay.com.br/docs/api-pix/webhooks#entendendo-o-padrão-mtls](https://dev.efipay.com.br/docs/api-pix/webhooks#entendendo-o-padrão-mtls));
+como não temos essa validação configurada (hospedado no Render, sem esse
+setup), esse header avisa a Efí para não exigir mTLS de entrada -- sem ele,
+o registro falha com `webhook_invalido` porque a checagem de
+acessibilidade da URL feita pela Efí recebe uma resposta que ela não
+consegue validar. É um valor fixo em `EfiPixClient.WEBHOOK_SKIP_MTLS_CHECKING`
+(não depende de env var); se o servidor um dia passar a validar mTLS de
+entrada de verdade, esse valor precisa virar `"false"`.
+
 Mesma proteção que `/admin/smoke-test/pix`: exige `ADMIN_SMOKE_TEST_TOKEN`
 via header `X-Admin-Token` ou query string `?token=`, mesmo comportamento
 fail-closed (`404` sem a variável configurada, `403` se o token não bater).
