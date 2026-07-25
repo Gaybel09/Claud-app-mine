@@ -35,6 +35,7 @@ from app.modules.ads.service import apply_ad_callback
 from app.modules.mining.service import MAX_REWARD, collect_mining_session, start_mining_session
 from app.modules.pix.service import create_withdrawal, list_user_withdrawals
 from app.modules.wallet.service import compute_balance
+from app.workers.tasks import reconcile_withdrawal
 
 # Headroom temporário dado ao reward_fund só para o sorteio da recompensa (até
 # MAX_REWARD) nunca falhar por falta de saldo, independente do saldo real do
@@ -43,7 +44,14 @@ from app.modules.wallet.service import compute_balance
 SMOKE_TEST_FUND_HEADROOM = MAX_REWARD * 10
 
 
-def run_pix_smoke_test(db: Session) -> dict:
+def run_pix_smoke_test(db: Session, force_reconcile: bool = False) -> dict:
+    """force_reconcile: roda reconcile_withdrawal (a mesma lógica do worker
+    periódico pix.reconcile_pending_withdrawals) logo após pix_withdraw, em
+    vez de esperar o agendamento do Celery Beat (a cada 5min) e o corte de
+    RECONCILE_AFTER_MINUTES (10min) -- útil para confirmar que o fluxo
+    funciona só com a reconciliação, sem depender do webhook receber
+    corretamente (ex: mTLS de recebimento não viável no plano gratuito do
+    Render)."""
     if not settings.EFI_PAYER_PIX_KEY:
         return {
             "run_id": None,
@@ -118,6 +126,7 @@ def run_pix_smoke_test(db: Session) -> dict:
             pix_key=settings.EFI_PAYER_PIX_KEY,
             idempotency_key=idempotency_key,
         )
+        state["withdrawal"] = withdrawal
         return {
             "withdrawal_id": withdrawal.id,
             "status": withdrawal.status,
@@ -127,6 +136,17 @@ def run_pix_smoke_test(db: Session) -> dict:
             "efi_id_envio": withdrawal.efi_id_envio,
             # Motivo reportado pela Efí quando status == "failed" -- ver
             # Withdrawal.failure_reason. Só null quando não houve falha.
+            "failure_reason": withdrawal.failure_reason,
+        }
+
+    def _pix_reconcile():
+        withdrawal = state["withdrawal"]
+        status_before = withdrawal.status
+        reconcile_withdrawal(db, withdrawal)
+        db.refresh(withdrawal)
+        return {
+            "status_before": status_before,
+            "status_after": withdrawal.status,
             "failure_reason": withdrawal.failure_reason,
         }
 
@@ -146,8 +166,10 @@ def run_pix_smoke_test(db: Session) -> dict:
         ("mining", _mining),
         ("wallet_balance", _wallet_balance),
         ("pix_withdraw", _pix_withdraw),
-        ("pix_withdrawals_list", _pix_withdrawals_list),
     ]
+    if force_reconcile:
+        ordered_steps.append(("pix_reconcile", _pix_reconcile))
+    ordered_steps.append(("pix_withdrawals_list", _pix_withdrawals_list))
 
     fund_snapshot = _grant_temporary_fund_headroom(db)
     try:

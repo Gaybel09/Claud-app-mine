@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy.orm import Session
+
 from app.core.efi import EfiApiError, EfiConfigurationError, efi_client
 from app.db.session import SessionLocal
 from app.models.withdrawal import Withdrawal, WithdrawalStatus
@@ -8,6 +10,24 @@ from app.modules.pix.service import RECONCILE_AFTER_MINUTES, apply_efi_status
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+def reconcile_withdrawal(db: Session, withdrawal: Withdrawal) -> None:
+    """Consulta o status real de um saque na Efí e aplica (ver
+    apply_efi_status) -- a mesma lógica usada pelo worker periódico
+    (reconcile_pending_withdrawals), extraída para poder ser chamada direto
+    e na hora, sem esperar o agendamento do Celery Beat nem o corte de
+    RECONCILE_AFTER_MINUTES (ex: GET /admin/smoke-test/pix?force_reconcile=true,
+    diagnóstico manual). Não levanta em caso de falha ao consultar a Efí --
+    só loga, igual ao worker periódico."""
+    try:
+        result = efi_client.get_send_status(withdrawal.efi_id_envio)
+    except (EfiApiError, EfiConfigurationError):
+        logger.warning("failed to reconcile withdrawal %s", withdrawal.id, exc_info=True)
+        return
+    efi_status = result.get("status")
+    if efi_status:
+        apply_efi_status(db, id_envio=withdrawal.efi_id_envio, efi_status=efi_status)
 
 
 @celery_app.task(name="mining.send_ready_notification")
@@ -35,13 +55,6 @@ def reconcile_pending_withdrawals() -> None:
             .all()
         )
         for withdrawal in stuck:
-            try:
-                result = efi_client.get_send_status(withdrawal.efi_id_envio)
-            except (EfiApiError, EfiConfigurationError):
-                logger.warning("failed to reconcile withdrawal %s", withdrawal.id, exc_info=True)
-                continue
-            efi_status = result.get("status")
-            if efi_status:
-                apply_efi_status(db, id_envio=withdrawal.efi_id_envio, efi_status=efi_status)
+            reconcile_withdrawal(db, withdrawal)
     finally:
         db.close()

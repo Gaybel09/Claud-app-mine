@@ -185,6 +185,16 @@ fica salvo em `withdrawals.failure_reason` para qualquer saque, mas só é
 exposto aqui, no diagnóstico -- nunca em `POST /pix/withdraw` ou `GET
 /pix/withdrawals` (a API que o app usa).
 
+Passe `?force_reconcile=true` para rodar, logo depois do saque, a mesma
+lógica do worker periódico (`pix.reconcile_pending_withdrawals`) na hora --
+sem esperar o agendamento do Celery Beat (5min) nem o corte de
+`RECONCILE_AFTER_MINUTES` (10min). Útil pra confirmar que o fluxo funciona
+só com a reconciliação, sem depender do webhook receber corretamente (ex:
+mTLS de recebimento não é viável no plano gratuito do Render). Adiciona uma
+etapa `pix_reconcile` com `status_before`/`status_after`/`failure_reason`,
+mostrando a transição de status do saque causada pela consulta real à Efí
+(`GET /v2/gn/pix/enviados/id-envio/:idEnvio`).
+
 **ATENÇÃO**: isto é só para diagnóstico manual em sandbox. Remova a rota
 (ou pare de configurar `ADMIN_SMOKE_TEST_TOKEN`) antes de operar fora de
 sandbox, em produção de verdade.

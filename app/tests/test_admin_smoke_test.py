@@ -88,6 +88,56 @@ def test_smoke_test_runs_all_steps_and_cleans_up(client: TestClient, monkeypatch
     assert steps["pix_withdrawals_list"]["ok"] is True
     assert steps["pix_withdrawals_list"]["final_status"] == "processing"
     assert steps["pix_withdrawals_list"]["final_failure_reason"] is None
+    # Sem ?force_reconcile=true, a etapa de reconciliação nem roda.
+    assert "pix_reconcile" not in steps
+
+
+def test_smoke_test_force_reconcile_confirms_payment(client: TestClient, monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "the-real-token")
+    monkeypatch.setattr(settings, "EFI_PAYER_PIX_KEY", "payer@example.com")
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+    monkeypatch.setattr(pix_service.efi_client, "get_send_status", lambda id_envio: {"status": "REALIZADO"})
+
+    response = client.get(
+        "/admin/smoke-test/pix?force_reconcile=true", headers={ADMIN_HEADER: "the-real-token"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["overall"] == "ok"
+    steps = body["steps"]
+    assert steps["pix_withdraw"]["status"] == "processing"
+    assert steps["pix_reconcile"]["ok"] is True
+    assert steps["pix_reconcile"]["status_before"] == "processing"
+    assert steps["pix_reconcile"]["status_after"] == "paid"
+    assert steps["pix_reconcile"]["failure_reason"] is None
+    assert steps["pix_withdrawals_list"]["final_status"] == "paid"
+
+
+def test_smoke_test_force_reconcile_tolerates_efi_query_failure(client: TestClient, monkeypatch):
+    """Se a consulta de status na Efí falhar durante a reconciliação forçada,
+    o passo não derruba o smoke test -- mesmo comportamento tolerante do
+    worker periódico (reconcile_withdrawal só loga e segue)."""
+    monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "the-real-token")
+    monkeypatch.setattr(settings, "EFI_PAYER_PIX_KEY", "payer@example.com")
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+
+    def _raise(id_envio):
+        raise pix_service.EfiApiError(500, "efi is down")
+
+    monkeypatch.setattr(pix_service.efi_client, "get_send_status", _raise)
+
+    response = client.get(
+        "/admin/smoke-test/pix?force_reconcile=true", headers={ADMIN_HEADER: "the-real-token"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["overall"] == "ok"
+    steps = body["steps"]
+    assert steps["pix_reconcile"]["ok"] is True
+    assert steps["pix_reconcile"]["status_before"] == "processing"
+    assert steps["pix_reconcile"]["status_after"] == "processing"
 
 
 def test_smoke_test_surfaces_efi_failure_reason(client: TestClient, monkeypatch):

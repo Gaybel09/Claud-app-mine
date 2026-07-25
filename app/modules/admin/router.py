@@ -27,7 +27,18 @@ def require_admin_token(
 
 
 @router.get("/smoke-test/pix", dependencies=[Depends(require_admin_token)])
-def pix_smoke_test(db: Session = Depends(get_db)):
+def pix_smoke_test(
+    db: Session = Depends(get_db),
+    force_reconcile: bool = Query(
+        False,
+        description=(
+            "Roda a reconciliação (mesma lógica do worker periódico "
+            "pix.reconcile_pending_withdrawals) logo após o saque, em vez de "
+            "esperar o agendamento -- para validar o fluxo sem depender do "
+            "webhook."
+        ),
+    ),
+):
     """Diagnóstico manual do fluxo completo (cadastro -> ... -> saque Pix),
     rodando dentro do próprio processo do backend -- ver
     app/modules/admin/smoke_test.py.
@@ -37,7 +48,7 @@ def pix_smoke_test(db: Session = Depends(get_db)):
     configurar ADMIN_SMOKE_TEST_TOKEN) antes de qualquer deploy de produção
     de verdade, fora de sandbox.
     """
-    return run_pix_smoke_test(db)
+    return run_pix_smoke_test(db, force_reconcile=force_reconcile)
 
 
 @router.get("/register-efi-webhook", dependencies=[Depends(require_admin_token)])
