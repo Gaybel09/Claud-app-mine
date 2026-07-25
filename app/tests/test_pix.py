@@ -178,6 +178,44 @@ def test_derive_id_envio_is_deterministic_and_alphanumeric():
     assert efi.derive_id_envio("a-different-key") != first
 
 
+def test_webhook_get_verification_check_returns_200(client: TestClient):
+    """A Efí checa se a URL do webhook responde antes de aceitar o
+    cadastro (PUT /v2/webhook/:chave) -- essa checagem pode usar GET, que
+    a notificação real (sempre POST) nunca usa."""
+    response = client.get("/pix/webhook")
+    assert response.status_code == 200
+
+
+def test_webhook_empty_post_body_is_treated_as_verification_ping(client: TestClient):
+    """A checagem de acessibilidade da Efí antes de cadastrar o webhook pode
+    mandar um POST com corpo vazio -- isso não deve ser tratado como uma
+    notificação de pagamento inválida (422), e sim como um ping, com 200."""
+    response = client.post("/pix/webhook", content=b"")
+    assert response.status_code == 200
+
+
+def test_webhook_post_body_not_matching_notification_shape_is_treated_as_ping(client: TestClient):
+    """Um corpo que não bate com o formato de notificação real (ex: sem
+    "status", ou nem é JSON) é tratado como ping de verificação -- 200, não
+    422 -- sem processar nada como pagamento."""
+    response = client.post("/pix/webhook", json={"ping": True})
+    assert response.status_code == 200
+
+    response = client.post(
+        "/pix/webhook", content=b"not json at all", headers={"Content-Type": "text/plain"}
+    )
+    assert response.status_code == 200
+
+
+def test_webhook_real_payload_missing_id_envio_still_rejected(client: TestClient):
+    """Um payload que TEM o formato de notificação real (passa na validação
+    Pydantic -- "status" presente) mas sem gnExtras.idEnvio continua sendo
+    rejeitado com 400, igual antes -- a tolerância a "ping" não enfraquece a
+    validação de um payload que é mesmo uma notificação."""
+    response = client.post("/pix/webhook", json={"status": "REALIZADO"})
+    assert response.status_code == 400
+
+
 def test_webhook_confirms_and_debits_balance(client: TestClient, monkeypatch):
     user_id = _register_user(client, monkeypatch, "uid-pix-webhook", "pix-webhook@example.com")
     _credit_balance(user_id, Decimal("100.00"))

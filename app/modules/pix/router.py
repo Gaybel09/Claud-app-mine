@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.efi import EfiApiError, EfiConfigurationError, efi_client
@@ -62,10 +63,41 @@ def list_withdrawals(
     return service.list_user_withdrawals(db, current_user.id)
 
 
+@router.get("/webhook")
+def webhook_ping():
+    """Antes de aceitar o cadastro de um webhook (PUT /v2/webhook/:chave),
+    a Efí verifica se a URL responde -- essa checagem pode usar GET, que a
+    notificação real (sempre POST) nunca usa. Só confirma que a URL está de
+    pé, não processa nada."""
+    return {"status": "ok"}
+
+
 @router.post("/webhook")
-def webhook(payload: PixWebhookRequest, db: Session = Depends(get_db)):
+async def webhook(request: Request, db: Session = Depends(get_db)):
     # Webhook da Efí (servidor-a-servidor), não do app -- por isso não exige
     # o Bearer do usuário, igual ao /ads/callback.
+    #
+    # Antes de aceitar o cadastro de um webhook, a Efí manda uma requisição
+    # de teste pra essa URL pra checar se ela responde -- e não
+    # necessariamente com o formato exato de uma notificação real (ex:
+    # corpo vazio). Se déssemos `payload: PixWebhookRequest` direto na
+    # assinatura, o FastAPI validaria via Pydantic antes de entrar aqui e
+    # essa checagem receberia 422 -- e a Efí rejeita o cadastro do webhook
+    # com "webhook_invalido" quando a URL responde 422. Por isso lemos e
+    # validamos o corpo manualmente: um corpo vazio ou que não bate com o
+    # formato esperado é tratado como esse "ping" de verificação e
+    # respondemos 200 sem processar nada. Um payload que TEM o formato de
+    # notificação real (ex: com "status" presente, mas outro campo errado)
+    # continua validando estrito e sendo processado normalmente -- nunca
+    # enfraquecemos a validação desse caso.
+    raw_body = await request.body()
+    if not raw_body:
+        return {"status": "ok"}
+    try:
+        payload = PixWebhookRequest.model_validate_json(raw_body)
+    except ValidationError:
+        return {"status": "ok"}
+
     id_envio = payload.gnExtras.idEnvio if payload.gnExtras else None
     if not id_envio:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "missing gnExtras.idEnvio")
