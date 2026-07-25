@@ -8,9 +8,11 @@ verdade (fora de sandbox):
   - Cria dados reais (usuário, cubo, sessão de mineração, ledger entries,
     withdrawal) a cada chamada. São sempre limpos ao final (sucesso ou
     falha), mas ainda assim é escrita real no banco de produção.
-  - Dispara uma chamada REAL de envio de Pix para a Efí (para
-    EFI_PAYER_PIX_KEY -- em sandbox, isso normalmente não move dinheiro de
-    verdade, mas fora de sandbox seria uma transferência real).
+  - Dispara uma chamada REAL de envio de Pix para a Efí, sempre para
+    EFI_SANDBOX_HOMOLOGATION_PIX_KEY (ver abaixo) -- em sandbox isso não
+    move dinheiro de verdade, mas fora de sandbox seria uma transferência
+    real (e essa chave de homologação não existiria/não bateria de
+    verdade).
   - O endpoint GET /admin/smoke-test/pix que chama isto só deve ficar
     acessível enquanto ADMIN_SMOKE_TEST_TOKEN estiver configurado.
     REMOVA a rota (ou pare de configurar essa variável) antes de operar
@@ -42,6 +44,20 @@ from app.workers.tasks import reconcile_withdrawal
 # fundo em produção. É revertido ao valor exato de antes ao final (sucesso ou
 # falha), igual à limpeza de usuário/cubo/etc feita em _cleanup.
 SMOKE_TEST_FUND_HEADROOM = MAX_REWARD * 10
+
+# Chave Pix oficial de homologação da Efí para testes de envio (Pix Out) em
+# sandbox -- documentada em dev.efipay.com.br/docs/api-pix/
+# envio-pagamento-pix ("Instruções para testes em Homologação"): só saques
+# para EXATAMENTE essa chave são confirmados/rejeitados de verdade pela Efí
+# em sandbox (valores entre R$0,01 e R$10,00, dentro da faixa de
+# MIN_REWARD/MAX_REWARD, são confirmados via webhook). Qualquer outra
+# chave -- mesmo uma chave real válida -- dá
+# "chave_favorecido_nao_encontrada". É ESPECÍFICA DO SANDBOX DE
+# HOMOLOGAÇÃO DA EFÍ: nunca deve ser usada em produção real, onde a
+# pix_key do saque vem do usuário de verdade (ver POST /pix/withdraw,
+# que nunca usa essa constante). Fixa aqui de propósito -- não vem de
+# EFI_PAYER_PIX_KEY nem de nenhum outro parâmetro/configuração.
+EFI_SANDBOX_HOMOLOGATION_PIX_KEY = "efipay@sejaefi.com.br"
 
 
 def run_pix_smoke_test(db: Session, force_reconcile: bool = False) -> dict:
@@ -123,13 +139,16 @@ def run_pix_smoke_test(db: Session, force_reconcile: bool = False) -> dict:
             db,
             user_id=state["user"].id,
             amount=state["reward_amount"],
-            pix_key=settings.EFI_PAYER_PIX_KEY,
+            # Sempre a chave de homologação da Efí, nunca EFI_PAYER_PIX_KEY
+            # nem qualquer outra configuração -- ver EFI_SANDBOX_HOMOLOGATION_PIX_KEY.
+            pix_key=EFI_SANDBOX_HOMOLOGATION_PIX_KEY,
             idempotency_key=idempotency_key,
         )
         state["withdrawal"] = withdrawal
         return {
             "withdrawal_id": withdrawal.id,
             "status": withdrawal.status,
+            "pix_key": withdrawal.pix_key,
             # idEnvio de verdade enviado à Efí (derivado de idempotency_key
             # -- ver app.core.efi.derive_id_envio), útil pra conferir no
             # painel da Efí qual envio corresponde a este smoke test.

@@ -83,6 +83,7 @@ def test_smoke_test_runs_all_steps_and_cleans_up(client: TestClient, monkeypatch
     assert Decimal(steps["wallet_balance"]["balance"]) == reward_amount
     assert steps["pix_withdraw"]["ok"] is True
     assert steps["pix_withdraw"]["status"] == "processing"
+    assert steps["pix_withdraw"]["pix_key"] == admin_smoke_test.EFI_SANDBOX_HOMOLOGATION_PIX_KEY
     assert re.fullmatch(r"[a-zA-Z0-9]{1,35}", steps["pix_withdraw"]["efi_id_envio"])
     assert steps["pix_withdraw"]["failure_reason"] is None
     assert steps["pix_withdrawals_list"]["ok"] is True
@@ -90,6 +91,33 @@ def test_smoke_test_runs_all_steps_and_cleans_up(client: TestClient, monkeypatch
     assert steps["pix_withdrawals_list"]["final_failure_reason"] is None
     # Sem ?force_reconcile=true, a etapa de reconciliação nem roda.
     assert "pix_reconcile" not in steps
+
+
+def test_smoke_test_withdraw_always_uses_efi_sandbox_homologation_pix_key(
+    client: TestClient, monkeypatch
+):
+    """Independente de EFI_PAYER_PIX_KEY (ou qualquer outra config), o saque
+    de teste tem que ir pra efipay@sejaefi.com.br -- a única chave que a
+    Efí confirma/rejeita de verdade em sandbox
+    (dev.efipay.com.br/docs/api-pix/envio-pagamento-pix). Qualquer outra
+    chave, mesmo uma chave real válida, dá "chave_favorecido_nao_encontrada"."""
+    assert admin_smoke_test.EFI_SANDBOX_HOMOLOGATION_PIX_KEY == "efipay@sejaefi.com.br"
+
+    monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "the-real-token")
+    monkeypatch.setattr(settings, "EFI_PAYER_PIX_KEY", "some-other-payer-key@example.com")
+
+    captured = {}
+
+    def _fake_send_pix(**kwargs):
+        captured.update(kwargs)
+        return {"status": "EM_PROCESSAMENTO"}
+
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", _fake_send_pix)
+
+    response = client.get("/admin/smoke-test/pix", headers={ADMIN_HEADER: "the-real-token"})
+    assert response.status_code == 200
+
+    assert captured["favorecido_chave"] == "efipay@sejaefi.com.br"
 
 
 def test_smoke_test_force_reconcile_confirms_payment(client: TestClient, monkeypatch):

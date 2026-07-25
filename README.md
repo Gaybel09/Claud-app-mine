@@ -173,8 +173,19 @@ A resposta traz `overall` (`"ok"`, `"failed"` ou `"not_configured"` se
 uma das 7 etapas. Os dados criados (usuário, cubo, sessão de mineração,
 ledger entries, withdrawal) são sempre apagados ao final, sucesso ou falha,
 e o saldo do `reward_fund` é restaurado ao valor exato de antes -- mas o
-envio de Pix disparado é real (para `EFI_PAYER_PIX_KEY`, contra o ambiente
-sandbox da Efí).
+envio de Pix disparado é real, contra o ambiente sandbox da Efí.
+
+O saque de teste sempre vai para `efipay@sejaefi.com.br` (chave `favorecido`,
+constante `EFI_SANDBOX_HOMOLOGATION_PIX_KEY` em `smoke_test.py`) -- nunca
+para `EFI_PAYER_PIX_KEY` nem qualquer outra configuração. É a chave oficial
+de homologação da Efí ([dev.efipay.com.br/docs/api-pix/envio-pagamento-pix](https://dev.efipay.com.br/docs/api-pix/envio-pagamento-pix),
+seção "Instruções para testes em Homologação"): em sandbox, só saques para
+EXATAMENTE essa chave são confirmados/rejeitados de verdade (valores entre
+R$0,01 e R$10,00, faixa em que `mining.MIN_REWARD`/`MAX_REWARD` sempre
+caem); qualquer outra chave -- mesmo uma chave real válida -- dá
+`chave_favorecido_nao_encontrada`. É específica do sandbox de homologação:
+`POST /pix/withdraw` (a API que o app usa) nunca usa essa constante, só o
+`pix_key` do usuário de verdade.
 
 Se o saque (etapa `pix_withdraw`) terminar com `status: "failed"`, o campo
 `failure_reason` (nas etapas `pix_withdraw` e `pix_withdrawals_list`) traz o
