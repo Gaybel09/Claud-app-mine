@@ -71,8 +71,18 @@ class MiningController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // TODO: plugar aqui a exibição real do SDK de anúncio (AdMob etc.);
-      // por enquanto o backend simula a confirmação via callback SSV.
+      // TODO: plugar aqui a exibição real do SDK de anúncio (AdMob etc.) --
+      // este app ainda não mostra nenhum anúncio de verdade.
+      //
+      // ATENÇÃO -- MODO DE DESENVOLVIMENTO TEMPORÁRIO: até esse SDK real
+      // ser integrado, o backend pode confirmar o ad_view sozinho, sem
+      // esperar nenhum callback SSV real de rede de anúncios (flag
+      // ADS_DEV_AUTO_CONFIRM em app/core/config.py, do lado do backend) --
+      // é por isso que o polling logo abaixo tende a resolver quase na
+      // hora hoje. Isso é uma FALHA DE SEGURANÇA GRAVE se ficar ligado em
+      // produção de verdade (mineração liberada de graça, sem nenhum
+      // anúncio sendo assistido) -- remova esse flag no backend assim que
+      // este TODO acima for resolvido.
       final adView = await adsApi.watch(adNetwork: 'generic_ssv');
       stage = CubeCycleStage.waitingAdConfirmation;
       notifyListeners();

@@ -340,3 +340,31 @@ distintos compartilham o mesmo `device_id` do usuário consultado --
 visibilidade pro admin decidir (ex: bloquear manualmente via
 `POST /admin/users/{id}/block` depois de olhar o agrupamento) -- nada é
 bloqueado automaticamente por compartilhar device_id.
+
+## ⚠️ Modo de desenvolvimento: `ADS_DEV_AUTO_CONFIRM` (seção 7)
+
+O app Flutter ainda não integra nenhum SDK de anúncios real (AdMob etc.) --
+`watchAd()` (`mobile/lib/controllers/mining_controller.dart`) chama
+`POST /ads/watch` e fica esperando o `ad_view` virar `confirmed`, o que
+normalmente só aconteceria via `POST /ads/callback` (o callback SSV de uma
+rede de anúncios de verdade). Sem SDK nenhum integrado, isso nunca chega a
+acontecer sozinho -- a mineração nunca destrava.
+
+Pra testar o fluxo completo (mineração -> coleta -> saldo) sem esperar a
+integração real do SDK, existe `ADS_DEV_AUTO_CONFIRM` (`app/core/config.py`):
+com `true`, `POST /ads/watch` confirma o `ad_view` na hora, sozinho, sem
+esperar nenhum callback externo -- ver o bloco marcado em
+`app/modules/ads/router.py`.
+
+**Default `false` (fail-safe) -- e precisa continuar assim em qualquer
+deploy de produção de verdade.** Sem um SDK real confirmando que o anúncio
+foi assistido até o fim, essa flag destrava mineração de graça pra
+qualquer usuário: não é só um bug de desenvolvimento, é uma falha de
+segurança grave se vazar pra produção. Pra testar no celular contra o
+backend já deployado no Render: ligue `ADS_DEV_AUTO_CONFIRM=true`
+manualmente pelo dashboard do Render (não sincronizado pelo `render.yaml`
+-- ver comentário lá), teste, e desligue (ou apague a variável) assim que
+terminar. **Remova a flag inteira** (a variável, o bloco em
+`ads/router.py`, e o comentário em `mining_controller.dart`) assim que o
+SDK de anúncios real for integrado no app -- ela não deve sobreviver além
+da fase de desenvolvimento sem SDK.

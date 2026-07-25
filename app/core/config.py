@@ -74,6 +74,21 @@ class Settings(BaseSettings):
     # volume esperado de recompensas.
     ADMIN_FUND_LOW_THRESHOLD: Decimal = Decimal("50.00")
 
+    # =========================================================================
+    # ATENÇÃO -- FLAG TEMPORÁRIA DE DESENVOLVIMENTO (seção 7). Enquanto nenhum
+    # SDK de anúncios real está integrado no app, POST /ads/watch confirma o
+    # ad_view sozinho (sem esperar o callback SSV de POST /ads/callback),
+    # liberando POST /mining/start na hora -- ver app/modules/ads/router.py.
+    #
+    # Default False (fail-safe: precisa ser LIGADA explicitamente).
+    # NUNCA deixe true em produção de verdade: sem um SDK real confirmando
+    # que o anúncio foi assistido até o fim, isso destrava mineração de
+    # graça pra qualquer usuário -- FALHA DE SEGURANÇA GRAVE, não só um bug.
+    # REMOVA esta variável (e o bloco de código que ela liga) assim que o
+    # SDK real for integrado no app Flutter.
+    # =========================================================================
+    ADS_DEV_AUTO_CONFIRM: bool = False
+
     @property
     def DATABASE_URL(self) -> str:
         if self.DATABASE_URL_ENV:
