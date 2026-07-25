@@ -8,6 +8,7 @@ from app.modules.admin_panel import service
 from app.modules.pix import service as pix_service
 from app.schemas.admin import (
     AdminFundRead,
+    AdminUserDevicesRead,
     AdminUserListRead,
     AdminWithdrawalListRead,
     AdminWithdrawalRead,
@@ -44,6 +45,18 @@ def unblock_user(user_id: int, db: Session = Depends(get_db)):
     except service.UserNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
     return {"id": user.id, "is_blocked": user.is_blocked}
+
+
+@router.get("/users/{user_id}/devices", response_model=AdminUserDevicesRead)
+def user_devices(user_id: int, db: Session = Depends(get_db)):
+    """Visibilidade básica de antifraude (seção 11) -- quantos usuários
+    distintos compartilham o mesmo device_id deste usuário. Não bloqueia
+    nada sozinho, só sinaliza."""
+    try:
+        result = service.get_user_devices(db, user_id)
+    except service.UserNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+    return AdminUserDevicesRead(**result)
 
 
 @router.get("/withdrawals", response_model=AdminWithdrawalListRead)

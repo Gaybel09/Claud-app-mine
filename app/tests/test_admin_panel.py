@@ -27,9 +27,12 @@ def _auth_header(token: str = "valid-token") -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _register_user(client: TestClient, monkeypatch, uid: str, email: str) -> int:
+def _register_user(client: TestClient, monkeypatch, uid: str, email: str, device_id: str | None = None) -> int:
     monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify(uid, email))
-    response = client.post("/auth/register", json={"pix_key": f"{uid}@example.com"}, headers=_auth_header())
+    headers = _auth_header()
+    if device_id is not None:
+        headers["X-Device-Id"] = device_id
+    response = client.post("/auth/register", json={"pix_key": f"{uid}@example.com"}, headers=headers)
     assert response.status_code == 201
     return response.json()["id"]
 
@@ -341,6 +344,73 @@ def test_fund_status_reports_low_balance_alert(client: TestClient, monkeypatch):
     assert Decimal(healthy_body["balance"]) == Decimal("100.00")
     assert Decimal(healthy_body["total_in"]) == Decimal("100.00")
     assert healthy_body["low_balance_alert"] is False
+
+
+# --- GET /admin/users/{id}/devices -------------------------------------------
+
+
+def test_user_devices_reports_no_sharing_when_device_is_unique(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-devices-1", "admin-devices-1@example.com")
+    target_id = _register_user(
+        client, monkeypatch, "uid-devices-solo", "devices-solo@example.com", device_id="device-solo"
+    )
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-devices-1", "admin-devices-1@example.com"))
+
+    response = client.get(f"/admin/users/{target_id}/devices", headers=_auth_header())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user_id"] == target_id
+    assert body["device_id"] == "device-solo"
+    assert body["shared_user_count"] == 1
+    assert [u["id"] for u in body["shared_users"]] == [target_id]
+
+
+def test_user_devices_reports_null_when_no_device_id_was_sent(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-devices-2", "admin-devices-2@example.com")
+    target_id = _register_user(client, monkeypatch, "uid-devices-none", "devices-none@example.com")
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-devices-2", "admin-devices-2@example.com"))
+
+    response = client.get(f"/admin/users/{target_id}/devices", headers=_auth_header())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["device_id"] is None
+    assert body["shared_user_count"] == 0
+    assert body["shared_users"] == []
+
+
+def test_user_devices_groups_users_sharing_the_same_device(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-devices-3", "admin-devices-3@example.com")
+    user_a = _register_user(
+        client, monkeypatch, "uid-devices-a", "devices-a@example.com", device_id="shared-device-1"
+    )
+    user_b = _register_user(
+        client, monkeypatch, "uid-devices-b", "devices-b@example.com", device_id="shared-device-1"
+    )
+    user_c = _register_user(
+        client, monkeypatch, "uid-devices-c", "devices-c@example.com", device_id="shared-device-1"
+    )
+    # Um usuário com device_id diferente não deve aparecer no agrupamento.
+    _register_user(client, monkeypatch, "uid-devices-other", "devices-other@example.com", device_id="another-device")
+
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-devices-3", "admin-devices-3@example.com"))
+
+    response = client.get(f"/admin/users/{user_b}/devices", headers=_auth_header())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["device_id"] == "shared-device-1"
+    assert body["shared_user_count"] == 3
+    assert {u["id"] for u in body["shared_users"]} == {user_a, user_b, user_c}
+
+    # Consultar qualquer um dos três retorna o mesmo agrupamento.
+    response_from_a = client.get(f"/admin/users/{user_a}/devices", headers=_auth_header())
+    assert {u["id"] for u in response_from_a.json()["shared_users"]} == {user_a, user_b, user_c}
+
+
+def test_user_devices_returns_404_for_nonexistent_user(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-devices-404", "admin-devices-404@example.com")
+
+    response = client.get("/admin/users/999999/devices", headers=_auth_header())
+    assert response.status_code == 404
 
 
 # --- POST /admin/promote-user, /admin/demote-user (ADMIN_SMOKE_TEST_TOKEN) --

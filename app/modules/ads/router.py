@@ -1,6 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
+from app.core.rate_limit import (
+    ADS_WATCH_LIMIT_PER_IP,
+    ADS_WATCH_LIMIT_PER_TOKEN,
+    get_auth_token_key,
+    limiter,
+)
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.ad_view import AdView
@@ -12,7 +19,10 @@ router = APIRouter(prefix="/ads", tags=["ads"])
 
 
 @router.post("/watch", response_model=AdViewRead, status_code=status.HTTP_201_CREATED)
+@limiter.limit(ADS_WATCH_LIMIT_PER_IP, key_func=get_remote_address)
+@limiter.limit(ADS_WATCH_LIMIT_PER_TOKEN, key_func=get_auth_token_key)
 def watch(
+    request: Request,
     payload: AdWatchRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

@@ -1,8 +1,15 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import ValidationError
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.core.efi import EfiApiError, EfiConfigurationError, efi_client
+from app.core.rate_limit import (
+    PIX_WITHDRAW_LIMIT_PER_IP,
+    PIX_WITHDRAW_LIMIT_PER_TOKEN,
+    get_auth_token_key,
+    limiter,
+)
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.user import User
@@ -32,7 +39,10 @@ def pix_health():
 
 
 @router.post("/withdraw", response_model=WithdrawalRead, status_code=status.HTTP_201_CREATED)
+@limiter.limit(PIX_WITHDRAW_LIMIT_PER_IP, key_func=get_remote_address)
+@limiter.limit(PIX_WITHDRAW_LIMIT_PER_TOKEN, key_func=get_auth_token_key)
 def withdraw(
+    request: Request,
     payload: PixWithdrawRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),

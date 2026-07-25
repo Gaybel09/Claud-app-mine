@@ -279,6 +279,7 @@ curl -X POST -H "X-Admin-Token: SEU_TOKEN" https://SEU_HOST/admin/promote-user/4
 | `GET /admin/withdrawals?status=&page=&page_size=` | Lista **todos** os saques do sistema (não só de um usuário), com `failure_reason` visível e filtro opcional por `status` (`pending`/`processing`/`paid`/`failed`) -- paginado |
 | `POST /admin/withdrawals/{id}/approve` | Confirma manualmente que um saque foi pago -- ver aviso abaixo |
 | `GET /admin/fund` | `balance`, `total_in`, `total_out` do `reward_fund`, e `low_balance_alert` (`true` se `balance < ADMIN_FUND_LOW_THRESHOLD`, configurável, default `50.00`) |
+| `GET /admin/users/{id}/devices` | Antifraude básico (seção 11) -- quantos usuários distintos compartilham o mesmo `device_id` deste usuário. Ver seção abaixo |
 
 **Sobre `POST /admin/withdrawals/{id}/approve`**: o fluxo normal de
 confirmação é 100% automático -- via webhook (`POST /pix/webhook`) ou, se
@@ -292,3 +293,50 @@ do usuário exatamente como uma confirmação real chegaria, então aprovar um
 saque que na verdade falhou deixa o saldo incorreto. Idempotente (`200` sem
 debitar de novo se já estiver `paid`); `400` se o saque já estiver `failed`
 (estado terminal que não pode virar `paid`); `404` se o id não existir.
+
+## Antifraude básico (seção 11)
+
+Primeira camada de limitação de abuso -- visibilidade e limites básicos, não
+um sistema de decisão de fraude completo (isso fica pra fases futuras).
+**Não bloqueia nada automaticamente** além do rate limit em si.
+
+### Rate limiting
+
+`POST /auth/register`, `POST /auth/login`, `POST /ads/watch`,
+`POST /mining/collect` e `POST /pix/withdraw` (as rotas mais expostas a
+abuso automatizado) têm dois limites cada, via [slowapi](https://github.com/laurentS/slowapi)
+com storage no Redis (`REDIS_URL`, compartilhado entre todas as instâncias
+do serviço web -- ver `app/core/rate_limit.py`):
+
+| Rota | Por IP | Por credencial (token) | Por quê |
+|---|---|---|---|
+| `POST /auth/register` | 5/hora | 5/hora | Cada cadastro gera um cubo inicial e passa a poder sacar do fundo -- o alvo é travar criação em massa de contas |
+| `POST /auth/login` | 30/min | 20/min | Chamado a cada abertura do app/refresh de token -- limite generoso pra não atrapalhar uso normal, mas trava enumeração agressiva |
+| `POST /ads/watch` | 60/min | 20/min | Assistir um anúncio de verdade leva tempo; 20/min já é folgado pra humano, trava scripts gerando `ad_view`s em volume |
+| `POST /mining/collect` | 30/min | 10/min | Coleta deveria acontecer ~1x por ciclo (2h); limita spam de polling/tentativas de abusar do lock de linha |
+| `POST /pix/withdraw` | 10/hora | 5/hora | Operação financeira, a mais sensível -- um saque legítimo é esporádico, não repetido |
+
+"Por IP" (`get_remote_address`) pega várias contas abusando a partir de um
+único IP/rede; "por credencial" (hash do Bearer token cru, sem decodificar
+de novo) pega uma única conta/token abusando a partir de IPs diferentes
+(ex: troca de proxy). Nenhum dos dois sozinho cobre os dois cenários, por
+isso as rotas aplicam os dois ao mesmo tempo. Uma requisição rejeitada por
+autenticação (401) nunca chega a contar pro limite -- isso é intencional
+(um 401 já é barato de rejeitar; o alvo é tráfego que passa da
+autenticação). Excedeu o limite: `429` com
+`{"error": "Rate limit exceeded: ..."}`.
+
+### Device fingerprint básico
+
+O app Flutter gera e persiste um identificador de device simples, mandado
+no cadastro via header `X-Device-Id` -- opcional; sem ele, `device_id` fica
+nulo. Só capturado no cadastro (`POST /auth/register`), nunca atualizado
+depois.
+
+`GET /admin/users/{id}/devices` (painel admin) mostra quantos usuários
+distintos compartilham o mesmo `device_id` do usuário consultado --
+`shared_user_count` inclui o próprio usuário, então `1` = não compartilhado,
+`> 1` é o sinal de possível múltiplas contas no mesmo aparelho. Só
+visibilidade pro admin decidir (ex: bloquear manualmente via
+`POST /admin/users/{id}/block` depois de olhar o agrupamento) -- nada é
+bloqueado automaticamente por compartilhar device_id.

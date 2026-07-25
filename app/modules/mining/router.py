@@ -1,8 +1,15 @@
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
+from app.core.rate_limit import (
+    MINING_COLLECT_LIMIT_PER_IP,
+    MINING_COLLECT_LIMIT_PER_TOKEN,
+    get_auth_token_key,
+    limiter,
+)
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.user import User
@@ -50,7 +57,10 @@ def get_status(
 
 
 @router.post("/collect", response_model=MiningCollectResponse)
+@limiter.limit(MINING_COLLECT_LIMIT_PER_IP, key_func=get_remote_address)
+@limiter.limit(MINING_COLLECT_LIMIT_PER_TOKEN, key_func=get_auth_token_key)
 def collect(
+    request: Request,
     payload: MiningCollectRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),

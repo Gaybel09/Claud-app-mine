@@ -49,3 +49,20 @@ class AdminFundRead(BaseModel):
     total_out: Decimal
     low_balance_alert: bool
     low_balance_threshold: Decimal
+
+
+class AdminSharedDeviceUserRead(BaseModel):
+    id: int
+    email: str
+    created_at: datetime
+    is_blocked: bool
+
+
+class AdminUserDevicesRead(BaseModel):
+    user_id: int
+    device_id: str | None
+    # Inclui o próprio usuário consultado -- count == 1 significa "device_id
+    # não compartilhado com ninguém"; count > 1 é o sinal de possível abuso
+    # (múltiplas contas no mesmo aparelho).
+    shared_user_count: int
+    shared_users: list[AdminSharedDeviceUserRead]

@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 
 from app.core import firebase
+from app.db.session import SessionLocal
+from app.models.user import User
 
 
 def _fake_verify(uid: str, email: str, phone_number: str | None = None):
@@ -34,6 +36,41 @@ def test_register_creates_user(client: TestClient, monkeypatch):
     assert body["phone"] == "+5511999990000"
     assert body["kyc_status"] == "pending"
     assert body["is_blocked"] is False
+
+
+def test_register_saves_device_id_from_header(client: TestClient, monkeypatch):
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-device", "device@example.com"))
+
+    response = client.post(
+        "/auth/register",
+        json={},
+        headers={**_auth_header(), "X-Device-Id": "device-abc-123"},
+    )
+    assert response.status_code == 201
+    user_id = response.json()["id"]
+
+    # device_id não é exposto no UserRead público -- confirma direto no banco.
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        assert user.device_id == "device-abc-123"
+    finally:
+        db.close()
+
+
+def test_register_without_device_id_header_saves_null(client: TestClient, monkeypatch):
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-no-device", "no-device@example.com"))
+
+    response = client.post("/auth/register", json={}, headers=_auth_header())
+    assert response.status_code == 201
+    user_id = response.json()["id"]
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        assert user.device_id is None
+    finally:
+        db.close()
 
 
 def test_register_rejects_duplicate_firebase_uid(client: TestClient, monkeypatch):

@@ -37,3 +37,10 @@ class User(Base):
     # pelo próprio painel ainda; promoção manual via
     # POST /admin/promote-user/{id} (protegida por ADMIN_SMOKE_TEST_TOKEN).
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # Fingerprint básico de device (seção 11, antifraude) -- gerado e
+    # persistido pelo próprio app Flutter, enviado via header X-Device-Id só
+    # no cadastro (POST /auth/register), nunca atualizado depois. Múltiplas
+    # contas com o mesmo device_id não são bloqueadas automaticamente --
+    # é só um sinal de possível abuso, visível pro admin em
+    # GET /admin/users/{id}/devices.
+    device_id: Mapped[str | None] = mapped_column(String(255), index=True, nullable=True)

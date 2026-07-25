@@ -75,6 +75,40 @@ def list_withdrawals(
     return items, total
 
 
+def get_user_devices(db: Session, user_id: int) -> dict:
+    """Sinal básico de antifraude (seção 11): quantos usuários distintos
+    compartilham o mesmo device_id do usuário consultado. Não bloqueia
+    nada automaticamente -- só visibilidade pro admin decidir (ex:
+    POST /admin/users/{id}/block manual em cima do que ver aqui)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise UserNotFoundError()
+
+    if user.device_id is None:
+        return {"user_id": user.id, "device_id": None, "shared_user_count": 0, "shared_users": []}
+
+    sharing_users = (
+        db.query(User)
+        .filter(User.device_id == user.device_id)
+        .order_by(User.created_at.asc())
+        .all()
+    )
+    return {
+        "user_id": user.id,
+        "device_id": user.device_id,
+        "shared_user_count": len(sharing_users),
+        "shared_users": [
+            {
+                "id": u.id,
+                "email": u.email,
+                "created_at": u.created_at,
+                "is_blocked": u.is_blocked,
+            }
+            for u in sharing_users
+        ],
+    }
+
+
 def get_fund_status(db: Session) -> dict:
     fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
     balance = fund.balance if fund is not None else 0
