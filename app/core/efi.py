@@ -117,15 +117,37 @@ class EfiPixClient:
         cert_path = _resolve_certificate_path()
         return httpx.Client(base_url=self.base_url, cert=cert_path, timeout=30.0)
 
-    def _get_access_token(self) -> str:
-        if self._access_token:
-            return self._access_token
+    def _request_new_access_token(self):
+        """Faz a chamada POST /oauth/token de verdade -- sem checar nem
+        popular o cache. Base compartilhada por _get_access_token,
+        check_auth e _get_fresh_access_token."""
         with self._http_client() as client:
-            response = client.post(
+            return client.post(
                 "/oauth/token",
                 auth=(settings.EFI_CLIENT_ID, settings.EFI_CLIENT_SECRET),
                 json={"grant_type": "client_credentials"},
             )
+
+    def _get_access_token(self) -> str:
+        if self._access_token:
+            return self._access_token
+        response = self._request_new_access_token()
+        if response.status_code != 200:
+            raise EfiApiError(response.status_code, response.text)
+        self._access_token = response.json()["access_token"]
+        return self._access_token
+
+    def _get_fresh_access_token(self) -> str:
+        """Como _get_access_token, mas sempre pede um token novo à Efí,
+        ignorando qualquer token cacheado -- necessário porque mudar os
+        escopos de uma aplicação no painel da Efí (ex: adicionar "Alterar
+        Webhooks") não invalida tokens já emitidos: um token cacheado de
+        uma chamada anterior no mesmo processo continuaria com os escopos
+        antigos, e a Efí rejeitaria a chamada com insufficient_scope mesmo
+        depois do escopo ter sido adicionado. Também atualiza o cache com o
+        token novo, para chamadas seguintes no mesmo processo já saírem
+        com os escopos atuais."""
+        response = self._request_new_access_token()
         if response.status_code != 200:
             raise EfiApiError(response.status_code, response.text)
         self._access_token = response.json()["access_token"]
@@ -140,12 +162,7 @@ class EfiPixClient:
         Não retorna nem loga o token; levanta EfiConfigurationError ou
         EfiApiError em caso de falha, sem incluir o corpo cru da resposta
         da Efí na mensagem (quem chama isso é um endpoint público)."""
-        with self._http_client() as client:
-            response = client.post(
-                "/oauth/token",
-                auth=(settings.EFI_CLIENT_ID, settings.EFI_CLIENT_SECRET),
-                json={"grant_type": "client_credentials"},
-            )
+        response = self._request_new_access_token()
         if response.status_code != 200:
             raise EfiApiError(response.status_code, "authentication failed")
         if "access_token" not in response.json():
@@ -193,8 +210,13 @@ class EfiPixClient:
         /v2/webhook/:chave. Só precisa ser feito uma vez por chave (ou de
         novo se a URL mudar); depois disso a Efí passa a chamar
         `webhook_url` para confirmar envios feitos com essa chave como
-        pagadora. Usado por GET /admin/register-efi-webhook (diagnóstico)."""
-        token = self._get_access_token()
+        pagadora. Usado por GET /admin/register-efi-webhook (diagnóstico).
+
+        Sempre pede um token novo (_get_fresh_access_token), nunca reaproveita
+        um token cacheado -- necessário para o token refletir escopos
+        adicionados recentemente na aplicação Efí (ver
+        _get_fresh_access_token)."""
+        token = self._get_fresh_access_token()
         with self._http_client() as client:
             response = client.put(
                 f"/v2/webhook/{pix_key}",

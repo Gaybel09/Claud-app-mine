@@ -396,3 +396,55 @@ def test_pix_health_never_leaks_efi_response_body(client: TestClient, monkeypatc
     assert response.status_code == 503
     assert "SECRETXYZ" not in response.text
     assert "invalid_client_secret" not in response.text
+
+
+def test_register_webhook_ignores_cached_token_and_requests_a_fresh_one(monkeypatch):
+    """Adicionar um escopo novo (ex: "Alterar Webhooks") na aplicação Efí não
+    invalida um token já emitido -- um token cacheado de uma chamada
+    anterior no mesmo processo continuaria com os escopos antigos e a Efí
+    rejeitaria com insufficient_scope. register_webhook precisa sempre pedir
+    um token novo, do mesmo jeito que check_auth já faz."""
+    monkeypatch.setattr(efi.settings, "EFI_CLIENT_ID", "id")
+    monkeypatch.setattr(efi.settings, "EFI_CLIENT_SECRET", "secret")
+
+    client = efi.EfiPixClient()
+    client._access_token = "stale-token-from-before-scope-change"
+
+    token_requests = {"n": 0}
+
+    class _FakeResponse:
+        def __init__(self, payload):
+            self.status_code = 200
+            self._payload = payload
+            self.text = str(payload)
+
+        def json(self):
+            return self._payload
+
+    class _FakeHttpClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, path, **kwargs):
+            assert path == "/oauth/token"
+            token_requests["n"] += 1
+            return _FakeResponse({"access_token": f"fresh-token-{token_requests['n']}"})
+
+        def put(self, path, **kwargs):
+            assert path == "/v2/webhook/payer@example.com"
+            assert kwargs["headers"]["Authorization"] == "Bearer fresh-token-1"
+            return _FakeResponse({"webhookUrl": kwargs["json"]["webhookUrl"]})
+
+    monkeypatch.setattr(client, "_http_client", lambda: _FakeHttpClient())
+
+    result = client.register_webhook(
+        pix_key="payer@example.com", webhook_url="https://host/pix/webhook"
+    )
+
+    assert token_requests["n"] == 1
+    assert result == {"webhookUrl": "https://host/pix/webhook"}
+    # O cache é atualizado com o token novo, não deixado com o antigo.
+    assert client._access_token == "fresh-token-1"
