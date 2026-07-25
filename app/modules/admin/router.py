@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
+from app.modules.admin.register_webhook import run_register_efi_webhook
 from app.modules.admin.smoke_test import run_pix_smoke_test
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -37,3 +38,18 @@ def pix_smoke_test(db: Session = Depends(get_db)):
     de verdade, fora de sandbox.
     """
     return run_pix_smoke_test(db)
+
+
+@router.get("/register-efi-webhook", dependencies=[Depends(require_admin_token)])
+def register_efi_webhook():
+    """Registra na Efí a URL de webhook de envio de Pix
+    (PUT /v2/webhook/:chave) para EFI_PAYER_PIX_KEY, apontando para
+    PUBLIC_BASE_URL + "/pix/webhook" -- ver
+    app/modules/admin/register_webhook.py.
+
+    APENAS PARA DIAGNÓSTICO EM SANDBOX. Faz uma chamada real de escrita na
+    conta Efí (registra/sobrescreve a URL de webhook associada à chave).
+    Remova esta rota (ou pare de configurar ADMIN_SMOKE_TEST_TOKEN) antes
+    de qualquer deploy de produção de verdade, fora de sandbox.
+    """
+    return run_register_efi_webhook()

@@ -188,5 +188,22 @@ class EfiPixClient:
             raise EfiApiError(response.status_code, response.text)
         return response.json()
 
+    def register_webhook(self, *, pix_key: str, webhook_url: str) -> dict:
+        """Registra a URL de webhook para uma chave Pix -- PUT
+        /v2/webhook/:chave. Só precisa ser feito uma vez por chave (ou de
+        novo se a URL mudar); depois disso a Efí passa a chamar
+        `webhook_url` para confirmar envios feitos com essa chave como
+        pagadora. Usado por GET /admin/register-efi-webhook (diagnóstico)."""
+        token = self._get_access_token()
+        with self._http_client() as client:
+            response = client.put(
+                f"/v2/webhook/{pix_key}",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"webhookUrl": webhook_url},
+            )
+        if response.status_code not in (200, 201):
+            raise EfiApiError(response.status_code, response.text)
+        return response.json()
+
 
 efi_client = EfiPixClient()

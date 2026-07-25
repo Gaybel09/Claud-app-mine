@@ -68,12 +68,18 @@ services:
         value: "true"
       - key: EFI_PAYER_PIX_KEY
         sync: false
-      # Protege GET /admin/smoke-test/pix (diagnóstico manual -- ver
-      # app/modules/admin/smoke_test.py e README). Sem esta variável setada,
-      # o endpoint responde 404 como se não existisse. Gere um valor forte
-      # com `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
-      # e REMOVA-a (ou deixe de configurá-la) antes de operar fora de
-      # sandbox, em produção de verdade.
+      # Usada só por GET /admin/register-efi-webhook para montar a URL de
+      # webhook (PUBLIC_BASE_URL + "/pix/webhook"). Não é secreta -- ajuste
+      # se o host do serviço mudar (ex: domínio customizado).
+      - key: PUBLIC_BASE_URL
+        value: https://cubemine-pix-api.onrender.com
+      # Protege GET /admin/smoke-test/pix e GET /admin/register-efi-webhook
+      # (diagnóstico manual -- ver app/modules/admin/ e README). Sem esta
+      # variável setada, as rotas respondem 404 como se não existissem. Gere
+      # um valor forte com
+      # `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` e
+      # REMOVA-a (ou deixe de configurá-la) antes de operar fora de sandbox,
+      # em produção de verdade.
       - key: ADMIN_SMOKE_TEST_TOKEN
         sync: false
 

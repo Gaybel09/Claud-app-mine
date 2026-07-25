@@ -188,3 +188,31 @@ exposto aqui, no diagnóstico -- nunca em `POST /pix/withdraw` ou `GET
 **ATENÇÃO**: isto é só para diagnóstico manual em sandbox. Remova a rota
 (ou pare de configurar `ADMIN_SMOKE_TEST_TOKEN`) antes de operar fora de
 sandbox, em produção de verdade.
+
+### Diagnóstico: `GET /admin/register-efi-webhook`
+
+Registra na Efí (`PUT /v2/webhook/:chave`) a URL de webhook de envio de Pix
+para `EFI_PAYER_PIX_KEY`, apontando para `PUBLIC_BASE_URL` + `/pix/webhook`
+(`PUBLIC_BASE_URL` já vem configurada com o host atual no Render -- ver
+`.env.example`/`render.yaml`). Alternativa a configurar isso manualmente no
+painel da Efí (Webhooks). Usa as mesmas credenciais já configuradas
+(`EFI_CLIENT_ID`/`EFI_CLIENT_SECRET`/certificado mTLS).
+
+Mesma proteção que `/admin/smoke-test/pix`: exige `ADMIN_SMOKE_TEST_TOKEN`
+via header `X-Admin-Token` ou query string `?token=`, mesmo comportamento
+fail-closed (`404` sem a variável configurada, `403` se o token não bater).
+
+```bash
+curl -H "X-Admin-Token: SEU_TOKEN" https://SEU_HOST/admin/register-efi-webhook
+```
+
+A resposta traz `ok` (`true`/`false`), `pix_key`, `webhook_url` e, em caso de
+sucesso, `efi_response` (o corpo devolvido pela Efí); em caso de falha,
+`error` com o motivo (ex: `"HTTP 400: ..."` se a Efí rejeitar a URL, ou
+`"EFI_PAYER_PIX_KEY is not configured"` se a chave não estiver setada).
+
+**ATENÇÃO**: isto é só para diagnóstico manual em sandbox -- faz uma
+chamada real de escrita na conta Efí (registra/sobrescreve a URL de webhook
+associada à chave). Remova a rota (ou pare de configurar
+`ADMIN_SMOKE_TEST_TOKEN`) antes de operar fora de sandbox, em produção de
+verdade.
