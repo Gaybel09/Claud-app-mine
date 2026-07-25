@@ -8,18 +8,24 @@ import 'api_exception.dart';
 /// se não houver usuário logado.
 typedef IdTokenProvider = Future<String?> Function();
 
+/// Provedor do device_id persistido localmente (ver DeviceFingerprint).
+typedef DeviceIdProvider = Future<String?> Function();
+
 /// Wrapper HTTP fino sobre o backend: anexa o Bearer token do Firebase em
-/// toda chamada autenticada e converte respostas de erro em [ApiException].
+/// toda chamada autenticada, o header X-Device-Id (antifraude, seção 11) em
+/// toda chamada, e converte respostas de erro em [ApiException].
 class ApiClient {
   ApiClient({
     required this.baseUrl,
     http.Client? httpClient,
     this.idTokenProvider,
+    this.deviceIdProvider,
   }) : _client = httpClient ?? http.Client();
 
   final String baseUrl;
   final http.Client _client;
   final IdTokenProvider? idTokenProvider;
+  final DeviceIdProvider? deviceIdProvider;
 
   Future<Map<String, String>> _headers({
     required bool auth,
@@ -30,6 +36,12 @@ class ApiClient {
       final token = await idTokenProvider!();
       if (token != null) {
         headers['Authorization'] = 'Bearer $token';
+      }
+    }
+    if (deviceIdProvider != null) {
+      final deviceId = await deviceIdProvider!();
+      if (deviceId != null) {
+        headers['X-Device-Id'] = deviceId;
       }
     }
     if (extra != null) headers.addAll(extra);

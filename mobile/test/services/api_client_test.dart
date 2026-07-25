@@ -45,6 +45,45 @@ void main() {
       expect(capturedRequest!.headers.containsKey('Authorization'), isFalse);
     });
 
+    test('attaches X-Device-Id from deviceIdProvider on every request', () async {
+      http.Request? capturedGetRequest;
+      http.Request? capturedPostRequest;
+      final mockClient = MockClient((request) async {
+        if (request.method == 'GET') {
+          capturedGetRequest = request;
+        } else {
+          capturedPostRequest = request;
+        }
+        return http.Response('{}', 200);
+      });
+
+      final client = ApiClient(
+        baseUrl: 'https://api.test',
+        httpClient: mockClient,
+        deviceIdProvider: () async => 'device-abc-123',
+      );
+
+      await client.get('/wallet/balance');
+      await client.post('/auth/register', body: {});
+
+      expect(capturedGetRequest!.headers['X-Device-Id'], 'device-abc-123');
+      expect(capturedPostRequest!.headers['X-Device-Id'], 'device-abc-123');
+    });
+
+    test('omits X-Device-Id when deviceIdProvider is not configured', () async {
+      http.Request? capturedRequest;
+      final mockClient = MockClient((request) async {
+        capturedRequest = request;
+        return http.Response('{}', 200);
+      });
+
+      final client = ApiClient(baseUrl: 'https://api.test', httpClient: mockClient);
+
+      await client.post('/auth/register', body: {});
+
+      expect(capturedRequest!.headers.containsKey('X-Device-Id'), isFalse);
+    });
+
     test('sends extra headers such as Idempotency-Key', () async {
       http.Request? capturedRequest;
       final mockClient = MockClient((request) async {

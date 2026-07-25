@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'core/api_client.dart';
 import 'core/api_config.dart';
 import 'core/auth_service.dart';
+import 'core/device_fingerprint.dart';
 import 'screens/auth/auth_gate.dart';
 import 'services/ads_api.dart';
 import 'services/auth_api.dart';
@@ -24,6 +25,7 @@ class CubeMinePixApp extends StatelessWidget {
           update: (_, authService, _) => ApiClient(
             baseUrl: ApiConfig.baseUrl,
             idTokenProvider: authService.getIdToken,
+            deviceIdProvider: deviceFingerprint.getDeviceId,
           ),
         ),
         ProxyProvider<ApiClient, AuthApi>(update: (_, client, _) => HttpAuthApi(client)),
