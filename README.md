@@ -452,6 +452,28 @@ Sem essas variáveis configuradas, o worker diário loga um aviso e mantém o
 valor vigente (fail-safe); `GET /admin/update-reward-config` reporta
 `{"ok": false, "error": "..."}` em vez de derrubar a rota.
 
+### Agendamento em produção: Render Cron Job, não Celery Beat
+
+`GET /admin/update-reward-config` roda 1x/dia em produção via um **Render
+Cron Job** (`cubemine-pix-update-reward-config` em `render.yaml`,
+`scripts/trigger_update_reward_config.py`, 6h UTC) -- não via o
+`beat_schedule` do Celery em `app/workers/celery_app.py` (que existe no
+código mas não roda de verdade em produção; nenhum Background Worker foi
+deployado). Para uma única tarefa diária, um Cron Job (container efêmero,
+cobrado só pelos segundos que roda, mínimo ~US$1/mês no Render) é bem mais
+barato que manter um Background Worker rodando 24/7 só para o Celery Beat
+checar o agendamento -- e reaproveita o mesmo endpoint admin já testado
+manualmente. Cron Jobs no Render não têm tier free, mas o custo é
+irrisório comparado a um worker full-time; reconsidere migrar para Celery
+Beat de verdade só se surgirem várias tarefas periódicas diferentes (a
+reconciliação de saques Pix, `pix.reconcile_pending_withdrawals` a cada
+5min, também não roda em produção ainda -- fora do escopo desta mudança).
+
+**Setup no Render**: depois do primeiro deploy do blueprint, cole o mesmo
+valor de `ADMIN_SMOKE_TEST_TOKEN` (do serviço web) no serviço cron
+`cubemine-pix-update-reward-config` -- variáveis de ambiente não são
+compartilhadas automaticamente entre serviços no Render.
+
 ### Conversão USD -> BRL do eCPM
 
 A conta AdMob reporta o eCPM na própria moeda da conta (confirmado no

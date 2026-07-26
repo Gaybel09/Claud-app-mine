@@ -1,8 +1,15 @@
 # Render Blueprint (https://render.com/docs/blueprint-spec).
 # Sobe o backend FastAPI (Fase 1) com Postgres e Redis gerenciados.
 #
-# O worker Celery (app/workers/) ainda não está declarado aqui -- este
-# blueprint cobre só a API + banco + cache, conforme pedido.
+# O worker Celery (app/workers/) ainda não está declarado aqui -- nenhuma das
+# tarefas periódicas do beat_schedule (app/workers/celery_app.py) roda de
+# verdade em produção via Celery Beat/worker. A tarefa diária de recompensa
+# (seção 7) é a exceção: ela roda via o Cron Job declarado no fim deste
+# arquivo, que só chama o endpoint admin HTTP já existente -- muito mais
+# barato do que manter um Background Worker 24/7 só para isso num app
+# pequeno (ver comentário no próprio serviço "cron" abaixo). A reconciliação
+# de saques Pix (pix.reconcile_pending_withdrawals, a cada 5min) continua
+# sem rodar em produção -- fora do escopo desta mudança.
 
 databases:
   - name: cubemine-pix-db
@@ -103,9 +110,9 @@ services:
       # recompensa por sessão variável, calculado a partir do eCPM real do
       # bloco premiado. Ver README ("Valor de recompensa variável por
       # sessão") para como gerar ADMOB_REFRESH_TOKEN e onde achar
-      # ADMOB_PUBLISHER_ID. Sem essas 4 variáveis, o worker diário
-      # (update_reward_config) só loga aviso e mantém o valor vigente --
-      # nunca falha nem derruba o deploy.
+      # ADMOB_PUBLISHER_ID. Sem essas 4 variáveis, GET /admin/update-reward-config
+      # (chamado 1x/dia pelo Cron Job no fim deste arquivo) só loga aviso e
+      # mantém o valor vigente -- nunca falha nem derruba o deploy.
       - key: ADMOB_CLIENT_ID
         sync: false
       - key: ADMOB_CLIENT_SECRET
@@ -126,3 +133,40 @@ services:
     region: oregon
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
+
+  # Roda diariamente GET /admin/update-reward-config (seção 7) -- ver
+  # scripts/trigger_update_reward_config.py. Escolhido em vez de um
+  # Background Worker com Celery Beat de verdade porque, para uma única
+  # tarefa 1x/dia, um Cron Job (container efêmero, cobrado só pelos
+  # segundos que roda) é bem mais barato do que manter um Background Worker
+  # rodando 24/7 só para o Celery Beat checar o agendamento -- e reaproveita
+  # o endpoint admin que já existe e já foi testado manualmente, sem
+  # precisar rodar `celery worker`/`celery beat` como processos separados
+  # em produção. Reconsidere migrar para Celery Beat de verdade só se
+  # surgirem várias tarefas periódicas diferentes (o beat_schedule em
+  # app/workers/celery_app.py já está pronto para isso).
+  #
+  # ATENÇÃO: Cron Jobs no Render não têm tier free -- exigem um plano pago
+  # (a partir de ~US$1/mês, cobrado só pelo tempo de execução), mesmo assim
+  # ordens de magnitude mais barato que um Background Worker full-time.
+  # "schedule" é sempre interpretado em UTC pelo Render, independente da
+  # região do serviço.
+  - type: cron
+    name: cubemine-pix-update-reward-config
+    runtime: python
+    plan: starter
+    region: oregon
+    schedule: "0 6 * * *" # 6h UTC, 1x/dia
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/trigger_update_reward_config.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.15
+      - key: PUBLIC_BASE_URL
+        value: https://cubemine-pix-api.onrender.com
+      # MESMO valor configurado no serviço web "cubemine-pix-api" acima --
+      # o Render não compartilha env vars entre serviços automaticamente
+      # (a menos que se use um Environment Group pelo dashboard). Cole o
+      # mesmo token aqui depois do primeiro deploy.
+      - key: ADMIN_SMOKE_TEST_TOKEN
+        sync: false
