@@ -11,8 +11,11 @@ Baseado na documentação pública do Google (developers.google.com/admob/api):
   com acesso à conta AdMob).
 - Relatório de rede: POST
   https://admob.googleapis.com/v1/accounts/{publisherId}/networkReport:generate,
-  filtrado por dimensão AD_UNIT e métrica OBSERVED_ECPM (valor monetário em
-  "micros" -- 1_000_000 micros = 1 unidade da moeda da conta).
+  filtrado por dimensão AD_UNIT e métrica IMPRESSION_RPM (valor monetário em
+  "micros" -- 1_000_000 micros = 1 unidade da moeda da conta). NÃO existe
+  métrica "OBSERVED_ECPM" na AdMob Reporting API v1 -- IMPRESSION_RPM é a
+  correta para eCPM (a API chama de "RPM", mas é o mesmo valor: receita
+  estimada por 1000 impressões).
 
 TODO: este sandbox não tem acesso de rede a googleapis.com para validar os
 payloads exatos contra a API viva (mesma limitação já registrada em
@@ -77,8 +80,10 @@ class AdMobReportingClient:
         return response.json()["access_token"]
 
     def get_average_ecpm(self, target_date: date, ad_unit_id: str | None = None) -> Decimal | None:
-        """eCPM médio observado (OBSERVED_ECPM) do bloco de anúncios em
-        `target_date`, na moeda da própria conta AdMob -- NÃO convertido
+        """eCPM médio do bloco de anúncios em `target_date` (métrica
+        IMPRESSION_RPM da AdMob Reporting API -- não existe "OBSERVED_ECPM"
+        na v1; IMPRESSION_RPM é o nome correto para essa métrica, mesmo
+        conceito de eCPM), na moeda da própria conta AdMob -- NÃO convertido
         para BRL (isso é responsabilidade de quem chama, ver
         app/modules/reward/service.py e settings.ADMOB_USD_TO_BRL_RATE).
         Retorna None se não houver nenhuma linha para o dia (ex: bloco sem
@@ -92,7 +97,7 @@ class AdMobReportingClient:
             "reportSpec": {
                 "dateRange": {"startDate": report_date, "endDate": report_date},
                 "dimensions": ["AD_UNIT"],
-                "metrics": ["OBSERVED_ECPM", "IMPRESSIONS"],
+                "metrics": ["IMPRESSION_RPM", "IMPRESSIONS"],
                 "dimensionFilters": [
                     {"dimension": "AD_UNIT", "matchesAny": {"values": [ad_unit_id]}}
                 ],
@@ -111,7 +116,7 @@ class AdMobReportingClient:
             row = item.get("row")
             if not row:
                 continue
-            ecpm_micros = row.get("metricValues", {}).get("OBSERVED_ECPM", {}).get("microsValue")
+            ecpm_micros = row.get("metricValues", {}).get("IMPRESSION_RPM", {}).get("microsValue")
             if ecpm_micros is not None:
                 return Decimal(ecpm_micros) / MICROS_PER_UNIT
         return None
