@@ -99,6 +99,21 @@ services:
       # que terminar.
       - key: ADS_DEV_AUTO_CONFIRM
         sync: false
+      # Integração com a AdMob Reporting API (seção 7) -- valor de
+      # recompensa por sessão variável, calculado a partir do eCPM real do
+      # bloco premiado. Ver README ("Valor de recompensa variável por
+      # sessão") para como gerar ADMOB_REFRESH_TOKEN e onde achar
+      # ADMOB_PUBLISHER_ID. Sem essas 4 variáveis, o worker diário
+      # (update_reward_config) só loga aviso e mantém o valor vigente --
+      # nunca falha nem derruba o deploy.
+      - key: ADMOB_CLIENT_ID
+        sync: false
+      - key: ADMOB_CLIENT_SECRET
+        sync: false
+      - key: ADMOB_REFRESH_TOKEN
+        sync: false
+      - key: ADMOB_PUBLISHER_ID
+        sync: false
 
   - type: keyvalue
     name: cubemine-pix-redis
