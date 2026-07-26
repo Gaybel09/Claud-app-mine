@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.rate_limit import (
     ADS_WATCH_LIMIT_PER_IP,
     ADS_WATCH_LIMIT_PER_TOKEN,
@@ -11,7 +10,7 @@ from app.core.rate_limit import (
 )
 from app.core.security import get_current_user
 from app.db.session import get_db
-from app.models.ad_view import AdView, AdViewStatus
+from app.models.ad_view import AdView
 from app.models.user import User
 from app.modules.ads.service import apply_ad_callback
 from app.schemas.ads import AdCallbackRequest, AdViewRead, AdWatchRequest
@@ -32,32 +31,6 @@ def watch(
     db.add(ad_view)
     db.commit()
     db.refresh(ad_view)
-
-    # =========================================================================
-    # ATENÇÃO -- BLOCO TEMPORÁRIO DE DESENVOLVIMENTO (seção 7). O app Flutter
-    # já integra o SDK real (google_mobile_ads, RewardedAd) e chama
-    # POST /ads/callback sozinho depois de onUserEarnedReward -- ver
-    # mobile/lib/controllers/mining_controller.dart. Este flag continua
-    # existindo só pra cenários sem o app de verdade rodando (ex: testes
-    # automatizados/diagnóstico no backend, como
-    # app/modules/admin/smoke_test.py), onde não há RewardedAd nenhum pra
-    # assistir. Com ADS_DEV_AUTO_CONFIRM ligada, confirma o ad_view na hora,
-    # sem esperar nenhuma chamada externa a POST /ads/callback -- mesma
-    # função (apply_ad_callback) que o callback de verdade usa, só chamada
-    # direto daqui.
-    #
-    # Desligada por padrão (ver app/core/config.py). NUNCA ligue em produção
-    # de verdade: sem um SDK real confirmando que o anúncio foi assistido até
-    # o fim, isso destrava mineração de graça pra qualquer usuário -- FALHA
-    # DE SEGURANÇA GRAVE. REMOVA este bloco (e ADS_DEV_AUTO_CONFIRM) assim
-    # que houver outra forma de testar sem ele (ou aceite mantê-lo só pra
-    # diagnóstico, nunca acessível em produção real).
-    if settings.ADS_DEV_AUTO_CONFIRM:
-        ad_view = apply_ad_callback(
-            db, ad_view_id=ad_view.id, user_id=current_user.id, status=AdViewStatus.CONFIRMED
-        )
-    # =========================================================================
-
     return ad_view
 
 

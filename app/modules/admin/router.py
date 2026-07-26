@@ -29,7 +29,24 @@ def require_admin_token(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "invalid admin token")
 
 
-@router.get("/smoke-test/pix", dependencies=[Depends(require_admin_token)])
+def require_diagnostics_enabled() -> None:
+    """Segunda camada de proteção, independente do token, só para as rotas
+    que são puro diagnóstico de setup (smoke-test/pix, register-efi-webhook)
+    -- NÃO aplicada a update-reward-config (chamada de verdade em produção
+    pelo Cron Job, ver render.yaml) nem a promote-user/demote-user
+    (necessárias em produção real, ver docstring de promote_user).
+
+    Fail closed: mesmo que ADMIN_SMOKE_TEST_TOKEN vaze ou seja adivinhado,
+    estas rotas continuam respondendo 404 a menos que
+    ENABLE_DIAGNOSTIC_ENDPOINTS esteja explicitamente ligada."""
+    if not settings.ENABLE_DIAGNOSTIC_ENDPOINTS:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+
+
+@router.get(
+    "/smoke-test/pix",
+    dependencies=[Depends(require_diagnostics_enabled), Depends(require_admin_token)],
+)
 def pix_smoke_test(
     db: Session = Depends(get_db),
     force_reconcile: bool = Query(
@@ -46,25 +63,31 @@ def pix_smoke_test(
     rodando dentro do próprio processo do backend -- ver
     app/modules/admin/smoke_test.py.
 
-    APENAS PARA DIAGNÓSTICO EM SANDBOX. Cria dados reais (limpos ao final)
-    e dispara um envio Pix real na Efí. Remova esta rota (ou pare de
-    configurar ADMIN_SMOKE_TEST_TOKEN) antes de qualquer deploy de produção
-    de verdade, fora de sandbox.
+    APENAS PARA DIAGNÓSTICO. Cria dados reais (limpos ao final) e dispara
+    um envio Pix real na Efí. Fica 404 em produção a menos que
+    ENABLE_DIAGNOSTIC_ENDPOINTS esteja explicitamente ligada (além do token
+    ADMIN_SMOKE_TEST_TOKEN) -- ligue só temporariamente pelo dashboard do
+    Render se precisar, e desligue assim que terminar.
     """
     return run_pix_smoke_test(db, force_reconcile=force_reconcile)
 
 
-@router.get("/register-efi-webhook", dependencies=[Depends(require_admin_token)])
+@router.get(
+    "/register-efi-webhook",
+    dependencies=[Depends(require_diagnostics_enabled), Depends(require_admin_token)],
+)
 def register_efi_webhook():
     """Registra na Efí a URL de webhook de envio de Pix
     (PUT /v2/webhook/:chave) para EFI_PAYER_PIX_KEY, apontando para
     PUBLIC_BASE_URL + "/pix/webhook" -- ver
     app/modules/admin/register_webhook.py.
 
-    APENAS PARA DIAGNÓSTICO EM SANDBOX. Faz uma chamada real de escrita na
-    conta Efí (registra/sobrescreve a URL de webhook associada à chave).
-    Remova esta rota (ou pare de configurar ADMIN_SMOKE_TEST_TOKEN) antes
-    de qualquer deploy de produção de verdade, fora de sandbox.
+    APENAS PARA DIAGNÓSTICO. Faz uma chamada real de escrita na conta Efí
+    (registra/sobrescreve a URL de webhook associada à chave). Fica 404 em
+    produção a menos que ENABLE_DIAGNOSTIC_ENDPOINTS esteja explicitamente
+    ligada (além do token ADMIN_SMOKE_TEST_TOKEN) -- ligue só
+    temporariamente pelo dashboard do Render se precisar (ex: reconfigurar
+    o webhook porque a URL mudou), e desligue assim que terminar.
     """
     return run_register_efi_webhook()
 

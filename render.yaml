@@ -95,16 +95,14 @@ services:
       # reward_fund.balance cai abaixo deste valor. Não é secreta.
       - key: ADMIN_FUND_LOW_THRESHOLD
         value: "50.00"
-      # ATENÇÃO -- FLAG TEMPORÁRIA DE DESENVOLVIMENTO (seção 7, ver
-      # app/modules/ads/router.py). Com "true", POST /ads/watch confirma o
-      # ad_view sozinho, sem esperar o SDK de anúncios real (que ainda não
-      # está integrado no app). Sem valor aqui = fica com o default seguro
-      # (false) do código. NUNCA deixe "true" em produção de verdade --
-      # destrava mineração de graça, sem nenhum anúncio sendo assistido.
-      # Ligue só temporariamente pelo dashboard do Render pra testar o
-      # fluxo completo no celular, e desligue (ou apague a variável) assim
-      # que terminar.
-      - key: ADS_DEV_AUTO_CONFIRM
+      # Segunda camada de proteção (além do token ADMIN_SMOKE_TEST_TOKEN)
+      # pra GET /admin/smoke-test/pix e GET /admin/register-efi-webhook --
+      # puro diagnóstico de setup, não usadas em operação normal (ver
+      # app/modules/admin/router.py). Sem valor aqui = fica com o default
+      # seguro (false) do código, e essas duas rotas respondem 404 mesmo
+      # com o token certo. Ligue só temporariamente pelo dashboard do
+      # Render se precisar diagnosticar algo, e desligue assim que terminar.
+      - key: ENABLE_DIAGNOSTIC_ENDPOINTS
         sync: false
       # Integração com a AdMob Reporting API (seção 7) -- valor de
       # recompensa por sessão variável, calculado a partir do eCPM real do

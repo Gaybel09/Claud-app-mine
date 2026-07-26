@@ -1,7 +1,6 @@
 from fastapi.testclient import TestClient
 
 from app.core import firebase
-from app.core.config import settings
 from app.db.session import SessionLocal
 from app.modules.ads.service import is_ad_confirmed
 
@@ -43,61 +42,6 @@ def test_watch_creates_pending_ad_view(client: TestClient, monkeypatch):
         assert is_ad_confirmed(db, ad_view_id) is False
     finally:
         db.close()
-
-
-def test_watch_does_not_auto_confirm_by_default(client: TestClient, monkeypatch):
-    """ADS_DEV_AUTO_CONFIRM tem que vir desligada por padrão -- fail-safe,
-    já que ligada sem querer em produção destrava mineração de graça."""
-    assert settings.ADS_DEV_AUTO_CONFIRM is False
-    user_id, ad_view_id = _watch_ad(client, monkeypatch, "uid-no-auto-confirm", "no-auto-confirm@example.com")
-
-    db = SessionLocal()
-    try:
-        assert is_ad_confirmed(db, ad_view_id) is False
-    finally:
-        db.close()
-
-
-def test_watch_auto_confirms_when_dev_flag_enabled(client: TestClient, monkeypatch):
-    """Modo de desenvolvimento temporário (ver app/core/config.py e
-    app/modules/ads/router.py) -- enquanto não existe SDK de anúncios real
-    integrado no app."""
-    monkeypatch.setattr(settings, "ADS_DEV_AUTO_CONFIRM", True)
-    user_id = _register_user(client, monkeypatch, "uid-dev-auto-confirm", "dev-auto-confirm@example.com")
-
-    response = client.post("/ads/watch", json={"ad_network": "admob"}, headers=_auth_header())
-    assert response.status_code == 201
-    assert response.json()["status"] == "confirmed"
-
-    db = SessionLocal()
-    try:
-        assert is_ad_confirmed(db, response.json()["id"]) is True
-    finally:
-        db.close()
-
-
-def test_watch_dev_auto_confirm_unblocks_mining_start_immediately(client: TestClient, monkeypatch):
-    """Prova o ponto real do flag: com ele ligado, dá pra iniciar a
-    mineração na hora, sem nenhuma chamada separada a /ads/callback -- é
-    exatamente o que substitui, temporariamente, o SDK de anúncios real."""
-    monkeypatch.setattr(settings, "ADS_DEV_AUTO_CONFIRM", True)
-    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-dev-flow", "dev-flow@example.com"))
-
-    register_response = client.post("/auth/register", json={}, headers=_auth_header())
-    assert register_response.status_code == 201
-
-    cubes_response = client.get("/cubes/me", headers=_auth_header())
-    cube_id = cubes_response.json()[0]["id"]
-
-    watch_response = client.post("/ads/watch", json={"ad_network": "admob"}, headers=_auth_header())
-    ad_view_id = watch_response.json()["id"]
-
-    start_response = client.post(
-        "/mining/start",
-        json={"cube_id": cube_id, "ad_view_id": ad_view_id},
-        headers=_auth_header(),
-    )
-    assert start_response.status_code == 201
 
 
 def test_callback_confirms_ad_view(client: TestClient, monkeypatch):

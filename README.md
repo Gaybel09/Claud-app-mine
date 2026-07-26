@@ -181,7 +181,7 @@ para `EFI_PAYER_PIX_KEY` nem qualquer outra configuração. É a chave oficial
 de homologação da Efí ([dev.efipay.com.br/docs/api-pix/envio-pagamento-pix](https://dev.efipay.com.br/docs/api-pix/envio-pagamento-pix),
 seção "Instruções para testes em Homologação"): em sandbox, só saques para
 EXATAMENTE essa chave são confirmados/rejeitados de verdade (valores entre
-R$0,01 e R$10,00, faixa em que `mining.MIN_REWARD`/`MAX_REWARD` sempre
+R$0,01 e R$10,00, faixa em que `reward.MIN_REWARD`/`MAX_REWARD` sempre
 caem); qualquer outra chave -- mesmo uma chave real válida -- dá
 `chave_favorecido_nao_encontrada`. É específica do sandbox de homologação:
 `POST /pix/withdraw` (a API que o app usa) nunca usa essa constante, só o
@@ -206,9 +206,8 @@ etapa `pix_reconcile` com `status_before`/`status_after`/`failure_reason`,
 mostrando a transição de status do saque causada pela consulta real à Efí
 (`GET /v2/gn/pix/enviados/id-envio/:idEnvio`).
 
-**ATENÇÃO**: isto é só para diagnóstico manual em sandbox. Remova a rota
-(ou pare de configurar `ADMIN_SMOKE_TEST_TOKEN`) antes de operar fora de
-sandbox, em produção de verdade.
+**ATENÇÃO**: isto é só para diagnóstico manual, com uma segunda camada de
+proteção além do token -- ver `ENABLE_DIAGNOSTIC_ENDPOINTS` mais abaixo.
 
 ### Diagnóstico: `GET /admin/register-efi-webhook`
 
@@ -232,7 +231,8 @@ entrada de verdade, esse valor precisa virar `"false"`.
 
 Mesma proteção que `/admin/smoke-test/pix`: exige `ADMIN_SMOKE_TEST_TOKEN`
 via header `X-Admin-Token` ou query string `?token=`, mesmo comportamento
-fail-closed (`404` sem a variável configurada, `403` se o token não bater).
+fail-closed (`404` sem a variável configurada, `403` se o token não bater)
+-- e a mesma segunda camada, `ENABLE_DIAGNOSTIC_ENDPOINTS` (ver abaixo).
 
 ```bash
 curl -H "X-Admin-Token: SEU_TOKEN" https://SEU_HOST/admin/register-efi-webhook
@@ -243,11 +243,30 @@ sucesso, `efi_response` (o corpo devolvido pela Efí); em caso de falha,
 `error` com o motivo (ex: `"HTTP 400: ..."` se a Efí rejeitar a URL, ou
 `"EFI_PAYER_PIX_KEY is not configured"` se a chave não estiver setada).
 
-**ATENÇÃO**: isto é só para diagnóstico manual em sandbox -- faz uma
-chamada real de escrita na conta Efí (registra/sobrescreve a URL de webhook
-associada à chave). Remova a rota (ou pare de configurar
-`ADMIN_SMOKE_TEST_TOKEN`) antes de operar fora de sandbox, em produção de
-verdade.
+**ATENÇÃO**: isto é só para diagnóstico manual -- faz uma chamada real de
+escrita na conta Efí (registra/sobrescreve a URL de webhook associada à
+chave). Segunda camada de proteção além do token -- ver
+`ENABLE_DIAGNOSTIC_ENDPOINTS` abaixo.
+
+### `ENABLE_DIAGNOSTIC_ENDPOINTS`: segunda camada de proteção
+
+`GET /admin/smoke-test/pix` e `GET /admin/register-efi-webhook` cumpriram
+a função de setup inicial (validar a integração Pix/Efí) e não devem ficar
+acessíveis em produção de verdade só por trás de `ADMIN_SMOKE_TEST_TOKEN`
+-- se esse token vazar ou for adivinhado, ele sozinho também dá acesso ao
+painel admin de verdade (`promote-user`, `users`, `withdrawals`, `fund`),
+então uma segunda camada independente, específica pra essas duas rotas de
+diagnóstico, vale a pena.
+
+`ENABLE_DIAGNOSTIC_ENDPOINTS` (`app/core/config.py`, default `false`,
+fail-safe): sem essa variável ligada, as duas rotas respondem `404` mesmo
+com o token certo. **Não afeta** `GET /admin/update-reward-config` (chamado
+de verdade em produção, 1x/dia, pelo Cron Job -- ver seção de recompensa
+variável) nem `promote-user`/`demote-user` (necessários mesmo em produção,
+ver docstring de `promote_user` em `app/modules/admin/router.py`). Ligue
+só temporariamente pelo dashboard do Render se precisar rodar o smoke test
+ou reconfigurar o webhook da Efí (ex: a URL mudou), e desligue assim que
+terminar.
 
 ## Painel admin (seção 10)
 
@@ -370,23 +389,6 @@ de verdade:
 ```bash
 flutter build apk --dart-define=ADS_USE_TEST_AD_UNITS=false
 ```
-
-### ⚠️ `ADS_DEV_AUTO_CONFIRM` (backend, `app/core/config.py`)
-
-O app já confirma o `ad_view` sozinho depois de assistir o anúncio de
-verdade (acima) -- não precisa mais desta flag pra testar o app
-interativamente. Ela continua existindo só para cenários **sem** o app
-rodando (testes automatizados, diagnóstico do backend como
-`admin/smoke_test.py`), onde não há RewardedAd nenhum pra assistir: com
-`true`, `POST /ads/watch` confirma o `ad_view` sozinho, sem esperar
-`POST /ads/callback`.
-
-**Default `false` (fail-safe) e precisa continuar assim em qualquer deploy
-de produção de verdade.** Sem uma confirmação real de que o anúncio foi
-assistido até o fim (seja pelo app com o SDK real, seja por uma futura
-verificação servidor-a-servidor), essa flag destrava mineração de graça
-pra qualquer usuário -- falha de segurança grave, não só um bug de
-desenvolvimento.
 
 ### Endurecimento futuro (fora do escopo desta integração)
 

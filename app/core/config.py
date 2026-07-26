@@ -74,22 +74,17 @@ class Settings(BaseSettings):
     # volume esperado de recompensas.
     ADMIN_FUND_LOW_THRESHOLD: Decimal = Decimal("50.00")
 
-    # =========================================================================
-    # ATENÇÃO -- FLAG TEMPORÁRIA DE DESENVOLVIMENTO (seção 7). O app Flutter
-    # já integra o RewardedAd real (google_mobile_ads) e confirma o ad_view
-    # sozinho, via chamada client-side a POST /ads/callback, depois de
-    # onUserEarnedReward -- ver mobile/lib/controllers/mining_controller.dart.
-    # Esta flag serve só pra cenários sem o app rodando de verdade (testes
-    # automatizados/diagnóstico do backend, ex: admin/smoke_test.py): com ela
-    # ligada, POST /ads/watch confirma o ad_view sozinho, sem esperar nenhuma
-    # chamada a POST /ads/callback -- ver app/modules/ads/router.py.
-    #
-    # Default False (fail-safe: precisa ser LIGADA explicitamente).
-    # NUNCA deixe true em produção de verdade: sem um SDK real confirmando
-    # que o anúncio foi assistido até o fim, isso destrava mineração de
-    # graça pra qualquer usuário -- FALHA DE SEGURANÇA GRAVE, não só um bug.
-    # =========================================================================
-    ADS_DEV_AUTO_CONFIRM: bool = False
+    # Protege GET /admin/smoke-test/pix e GET /admin/register-efi-webhook
+    # (junto com ADMIN_SMOKE_TEST_TOKEN, ver app/modules/admin/router.py) --
+    # uma segunda camada, independente do token: mesmo que o token vaze ou
+    # seja adivinhado, essas rotas continuam respondendo 404 a menos que
+    # esta variável esteja explicitamente ligada. Default False (fail-safe).
+    # Essas rotas cumpriram a função de setup inicial (validar a integração
+    # com a Efí) e não devem ficar acessíveis em produção de verdade --
+    # ligue só temporariamente, pelo dashboard do Render, se precisar
+    # diagnosticar algo (ex: reconfigurar o webhook da Efí porque a URL
+    # mudou) e desligue (ou apague a variável) assim que terminar.
+    ENABLE_DIAGNOSTIC_ENDPOINTS: bool = False
 
     # Integração com a AdMob Reporting API (seção 7): valor de recompensa por
     # sessão variável, baseado no eCPM real do bloco premiado -- ver

@@ -1,6 +1,7 @@
 import re
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
@@ -12,10 +13,34 @@ from app.modules.pix import service as pix_service
 ADMIN_HEADER = "X-Admin-Token"
 
 
+@pytest.fixture(autouse=True)
+def _enable_diagnostic_endpoints(monkeypatch):
+    """Estes testes exercitam o comportamento real de /admin/smoke-test/pix
+    (token, passos do fluxo, etc) -- não o novo gate ENABLE_DIAGNOSTIC_ENDPOINTS
+    em si (default False, coberto por
+    test_smoke_test_returns_404_when_diagnostics_disabled_even_with_valid_token
+    logo abaixo, que desliga de volta explicitamente)."""
+    monkeypatch.setattr(settings, "ENABLE_DIAGNOSTIC_ENDPOINTS", True)
+
+
 def test_smoke_test_returns_404_when_not_configured(client: TestClient, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", None)
 
     response = client.get("/admin/smoke-test/pix", headers={ADMIN_HEADER: "anything"})
+    assert response.status_code == 404
+
+
+def test_smoke_test_returns_404_when_diagnostics_disabled_even_with_valid_token(
+    client: TestClient, monkeypatch
+):
+    """Prova a segunda camada de proteção (ENABLE_DIAGNOSTIC_ENDPOINTS,
+    default False): mesmo com o token certo, a rota continua 404 até essa
+    variável ser explicitamente ligada -- o token vazar/ser adivinhado
+    sozinho não basta pra acessar a rota."""
+    monkeypatch.setattr(settings, "ENABLE_DIAGNOSTIC_ENDPOINTS", False)
+    monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "the-real-token")
+
+    response = client.get("/admin/smoke-test/pix", headers={ADMIN_HEADER: "the-real-token"})
     assert response.status_code == 404
 
 
