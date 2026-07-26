@@ -103,10 +103,12 @@ class Settings(BaseSettings):
     # Unit) -- usado como {publisherId} em accounts/{publisherId} na
     # Reporting API. Ver painel AdMob > Configurações da conta > ID do editor.
     ADMOB_PUBLISHER_ID: str | None = None
-    # ID numérico do bloco de anúncios premiado, como a Reporting API espera
-    # (só o número depois da barra do Ad Unit ID completo do SDK, ex:
-    # "ca-app-pub-9407999187872272/9926844486" -> "9926844486").
-    ADMOB_AD_UNIT_ID: str = "9926844486"
+    # Ad Unit ID COMPLETO do bloco premiado (mesmo valor usado no SDK, ver
+    # mobile/lib/core/ads_config.dart) -- é esse o formato que o filtro
+    # AD_UNIT da Reporting API espera. Só o sufixo numérico (ex:
+    # "9926844486", sem o prefixo "ca-app-pub-.../") é rejeitado pela API
+    # com "Valor do filtro de dimensão AD_UNIT malformado".
+    ADMOB_AD_UNIT_ID: str = "ca-app-pub-9407999187872272/9926844486"
 
     # Fração do eCPM médio repassada como recompensa por sessão (seção 7):
     # valor_por_sessao = (eCPM_medio * ADMOB_REWARD_MARGIN) / 1000. Ex: 0.5

@@ -442,10 +442,11 @@ acesso à conta AdMob:
   (escopo `https://www.googleapis.com/auth/admob.readonly`).
 - `ADMOB_PUBLISHER_ID`: ID da conta AdMob (formato `pub-XXXXXXXXXXXXXXXX`,
   painel AdMob > Configurações da conta).
-- `ADMOB_AD_UNIT_ID`: ID numérico do bloco premiado, como a Reporting API
-  espera -- só o número depois da barra do Ad Unit ID completo do SDK
-  (`ca-app-pub-9407999187872272/9926844486` -> `9926844486`, já é o
-  default).
+- `ADMOB_AD_UNIT_ID`: Ad Unit ID **completo** do bloco premiado, mesmo
+  valor usado no SDK (`ca-app-pub-9407999187872272/9926844486`, já é o
+  default) -- o filtro `AD_UNIT` da Reporting API espera o ID completo, não
+  só o sufixo numérico (só o sufixo é rejeitado com "Valor do filtro de
+  dimensão AD_UNIT malformado").
 
 Sem essas variáveis configuradas, o worker diário loga um aviso e mantém o
 valor vigente (fail-safe); `GET /admin/update-reward-config` reporta

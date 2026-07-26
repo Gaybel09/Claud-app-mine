@@ -98,6 +98,11 @@ class AdMobReportingClient:
                 "dateRange": {"startDate": report_date, "endDate": report_date},
                 "dimensions": ["AD_UNIT"],
                 "metrics": ["IMPRESSION_RPM", "IMPRESSIONS"],
+                # O filtro AD_UNIT espera o Ad Unit ID COMPLETO (ex:
+                # "ca-app-pub-9407999187872272/9926844486"), não só o
+                # sufixo numérico -- só o sufixo é rejeitado com "Valor do
+                # filtro de dimensão AD_UNIT malformado". Ver
+                # settings.ADMOB_AD_UNIT_ID.
                 "dimensionFilters": [
                     {"dimension": "AD_UNIT", "matchesAny": {"values": [ad_unit_id]}}
                 ],
