@@ -65,13 +65,17 @@ class AdMobReportingClient:
         máximo 1x/dia (worker diário), então não vale a pena cachear um
         token que expira em ~1h entre execuções."""
         self._require_credentials()
+        # .strip() defensivo (mesmo motivo do get_average_ecpm): estas 3
+        # credenciais tendem a ser coladas manualmente no dashboard do
+        # Render -- ex: um refresh_token copiado da saída de um script de
+        # terminal costuma trazer uma quebra de linha grudada no fim.
         with httpx.Client(timeout=30.0) as client:
             response = client.post(
                 OAUTH_TOKEN_URL,
                 data={
-                    "client_id": settings.ADMOB_CLIENT_ID,
-                    "client_secret": settings.ADMOB_CLIENT_SECRET,
-                    "refresh_token": settings.ADMOB_REFRESH_TOKEN,
+                    "client_id": settings.ADMOB_CLIENT_ID.strip(),
+                    "client_secret": settings.ADMOB_CLIENT_SECRET.strip(),
+                    "refresh_token": settings.ADMOB_REFRESH_TOKEN.strip(),
                     "grant_type": "refresh_token",
                 },
             )
@@ -89,7 +93,13 @@ class AdMobReportingClient:
         Retorna None se não houver nenhuma linha para o dia (ex: bloco sem
         nenhuma impressão) -- quem chama decide o que fazer nesse caso (ver
         app/modules/reward/service.py, que mantém o valor vigente inalterado)."""
-        ad_unit_id = ad_unit_id or settings.ADMOB_AD_UNIT_ID
+        # .strip() defensivo: ADMOB_AD_UNIT_ID/ADMOB_PUBLISHER_ID podem vir de
+        # uma env var colada manualmente no dashboard do Render -- um espaço,
+        # quebra de linha ou ponto de pontuação grudado no fim (ex: copiado de
+        # uma frase que termina em ".") corromperia o valor silenciosamente e
+        # a API rejeitaria como "malformado" sem indicar isso claramente.
+        ad_unit_id = (ad_unit_id or settings.ADMOB_AD_UNIT_ID).strip()
+        publisher_id = settings.ADMOB_PUBLISHER_ID.strip()
         token = self._get_access_token()
 
         report_date = {"year": target_date.year, "month": target_date.month, "day": target_date.day}
@@ -110,7 +120,7 @@ class AdMobReportingClient:
         }
         with httpx.Client(base_url=REPORTING_BASE_URL, timeout=30.0) as client:
             response = client.post(
-                f"/accounts/{settings.ADMOB_PUBLISHER_ID}/networkReport:generate",
+                f"/accounts/{publisher_id}/networkReport:generate",
                 headers={"Authorization": f"Bearer {token}"},
                 json=body,
             )
