@@ -78,9 +78,11 @@ class AdMobReportingClient:
 
     def get_average_ecpm(self, target_date: date, ad_unit_id: str | None = None) -> Decimal | None:
         """eCPM médio observado (OBSERVED_ECPM) do bloco de anúncios em
-        `target_date`, na moeda da própria conta AdMob. Retorna None se não
-        houver nenhuma linha para o dia (ex: bloco sem nenhuma impressão) --
-        quem chama decide o que fazer nesse caso (ver
+        `target_date`, na moeda da própria conta AdMob -- NÃO convertido
+        para BRL (isso é responsabilidade de quem chama, ver
+        app/modules/reward/service.py e settings.ADMOB_USD_TO_BRL_RATE).
+        Retorna None se não houver nenhuma linha para o dia (ex: bloco sem
+        nenhuma impressão) -- quem chama decide o que fazer nesse caso (ver
         app/modules/reward/service.py, que mantém o valor vigente inalterado)."""
         ad_unit_id = ad_unit_id or settings.ADMOB_AD_UNIT_ID
         token = self._get_access_token()

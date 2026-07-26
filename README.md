@@ -451,6 +451,16 @@ Sem essas variáveis configuradas, o worker diário loga um aviso e mantém o
 valor vigente (fail-safe); `GET /admin/update-reward-config` reporta
 `{"ok": false, "error": "..."}` em vez de derrubar a rota.
 
+### Conversão USD -> BRL do eCPM
+
+A conta AdMob reporta o eCPM na própria moeda da conta (confirmado no
+painel AdMob > Configurações > Conta: "Dólar americano (USD US$)" nesta
+conta), mas a carteira do usuário é paga em Real via Pix. `ADMOB_USD_TO_BRL_RATE`
+(default `5.50` em `app/core/config.py`) converte o eCPM para BRL antes de
+calcular o valor por sessão -- **é uma taxa manual**, não busca câmbio ao
+vivo. Atualize essa variável de vez em quando no Render conforme a cotação
+real mudar; o worker não faz isso sozinho.
+
 **TODO (fora do escopo desta integração):** este sandbox não tem acesso de
 rede a `googleapis.com` para validar `networkReport:generate` contra a API
 viva -- confira a documentação oficial

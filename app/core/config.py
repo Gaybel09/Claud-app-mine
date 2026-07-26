@@ -114,6 +114,15 @@ class Settings(BaseSettings):
     # segurança (custo de infra, inadimplência do fundo, etc).
     ADMOB_REWARD_MARGIN: Decimal = Decimal("0.5")
 
+    # A conta AdMob reporta o eCPM na moeda da própria conta (confirmado no
+    # painel AdMob > Configurações > Conta: "Dólar americano (USD US$)"
+    # nesta conta), mas a carteira do usuário é paga em Real via Pix --
+    # sem converter, o cálculo trataria um eCPM de US$10 como se fosse
+    # R$10, quando na verdade valem ~R$55-60. Taxa MANUAL (não busca
+    # câmbio ao vivo): atualize esta variável de vez em quando (ver
+    # README) -- o worker diário não faz isso sozinho.
+    ADMOB_USD_TO_BRL_RATE: Decimal = Decimal("5.50")
+
     @property
     def DATABASE_URL(self) -> str:
         if self.DATABASE_URL_ENV:

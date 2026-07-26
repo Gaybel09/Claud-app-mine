@@ -58,17 +58,22 @@ def update_reward_config_from_admob(db: Session, *, for_date: date | None = None
     sessão -- ausência de dado não deve ser interpretada como eCPM zero."""
     target_date = for_date or (datetime.now(timezone.utc).date() - timedelta(days=1))
 
-    avg_ecpm = admob_client.get_average_ecpm(target_date)
+    avg_ecpm_usd = admob_client.get_average_ecpm(target_date)
     config = db.query(RewardConfig).filter(RewardConfig.id == SINGLETON_ID).with_for_update().first()
     if config is None:
         raise RuntimeError("reward_config singleton row is missing -- run migrations")
 
-    if avg_ecpm is None:
+    if avg_ecpm_usd is None:
         logger.warning("no AdMob eCPM data for %s -- keeping reward_config unchanged", target_date)
         return config
 
-    config.value_per_session = compute_value_per_session(avg_ecpm)
-    config.avg_ecpm = avg_ecpm.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    # A AdMob Reporting API devolve o eCPM na moeda da conta (USD nesta
+    # conta) -- converte para BRL antes de calcular e de gravar em
+    # reward_config.avg_ecpm, já que é o que a carteira paga via Pix.
+    avg_ecpm_brl = avg_ecpm_usd * settings.ADMOB_USD_TO_BRL_RATE
+
+    config.value_per_session = compute_value_per_session(avg_ecpm_brl)
+    config.avg_ecpm = avg_ecpm_brl.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
     config.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(config)

@@ -114,6 +114,11 @@ services:
         sync: false
       - key: ADMOB_PUBLISHER_ID
         sync: false
+      # Taxa MANUAL de conversão USD -> BRL do eCPM (a conta AdMob reporta
+      # em dólar) -- não é secreta, mas atualize de vez em quando conforme
+      # a cotação real mudar (ver README). O worker não busca câmbio ao vivo.
+      - key: ADMOB_USD_TO_BRL_RATE
+        value: "5.50"
 
   - type: keyvalue
     name: cubemine-pix-redis

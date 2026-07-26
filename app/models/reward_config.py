@@ -35,8 +35,11 @@ class RewardConfig(Base):
         default=DEFAULT_VALUE_PER_SESSION,
         server_default=str(DEFAULT_VALUE_PER_SESSION),
     )
-    # eCPM médio (na moeda da conta AdMob) usado no último cálculo -- null
-    # até a primeira execução bem-sucedida do worker (ver seed na migration).
+    # eCPM médio usado no último cálculo, já convertido para BRL (a AdMob
+    # devolve na moeda da conta -- USD nesta conta -- convertido via
+    # settings.ADMOB_USD_TO_BRL_RATE antes de chegar aqui, ver
+    # app/modules/reward/service.py). Null até a primeira execução
+    # bem-sucedida do worker (ver seed na migration).
     avg_ecpm: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.core import firebase
 from app.core.admob import AdMobApiError, AdMobConfigurationError, admob_client
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.ad_view import AdView, AdViewStatus
 from app.models.cube import Cube, CubeType
@@ -50,6 +51,14 @@ def _get_reward_config() -> RewardConfig:
         db.close()
 
 
+def _use_fx_rate_of_one(monkeypatch) -> None:
+    """A maioria dos testes abaixo exercita o cálculo eCPM -> valor por
+    sessão em isolamento, sem querer também testar a conversão USD -> BRL
+    (coberta separadamente) -- fixa a taxa em 1 pra eles poderem continuar
+    tratando o eCPM "fake" retornado como já estando em BRL."""
+    monkeypatch.setattr(settings, "ADMOB_USD_TO_BRL_RATE", Decimal("1"))
+
+
 # --- cálculo do valor a partir do eCPM (item 6 do pedido) -----------------
 
 
@@ -85,6 +94,7 @@ def test_compute_value_per_session_clamps_to_max_reward():
 
 
 def test_update_reward_config_from_admob_updates_value_and_ecpm(monkeypatch):
+    _use_fx_rate_of_one(monkeypatch)
     monkeypatch.setattr(admob_client, "get_average_ecpm", lambda target_date, ad_unit_id=None: Decimal("600.00"))
 
     db = SessionLocal()
@@ -153,8 +163,6 @@ def test_update_reward_config_from_admob_propagates_configuration_error(monkeypa
 
 
 def test_admin_update_reward_config_endpoint_reports_configuration_error(client: TestClient, monkeypatch):
-    from app.core.config import settings
-
     monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "test-admin-token")
 
     def _raise(target_date, ad_unit_id=None):
@@ -168,8 +176,7 @@ def test_admin_update_reward_config_endpoint_reports_configuration_error(client:
 
 
 def test_admin_update_reward_config_endpoint_updates_config(client: TestClient, monkeypatch):
-    from app.core.config import settings
-
+    _use_fx_rate_of_one(monkeypatch)
     monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "test-admin-token")
     monkeypatch.setattr(admob_client, "get_average_ecpm", lambda target_date, ad_unit_id=None: Decimal("600.00"))
 
@@ -193,6 +200,7 @@ def test_reward_current_returns_seeded_default(client: TestClient):
 
 
 def test_reward_current_reflects_worker_update(client: TestClient, monkeypatch):
+    _use_fx_rate_of_one(monkeypatch)
     monkeypatch.setattr(admob_client, "get_average_ecpm", lambda target_date, ad_unit_id=None: Decimal("900.00"))
     db = SessionLocal()
     try:
@@ -211,6 +219,24 @@ def test_reward_current_requires_no_auth(client: TestClient):
     # Rota pública -- nenhum header de autenticação.
     response = client.get("/reward/current")
     assert response.status_code == 200
+
+
+# --- conversão USD -> BRL do eCPM (a conta AdMob reporta em dólar) --------
+
+
+def test_update_reward_config_from_admob_converts_usd_ecpm_to_brl(monkeypatch):
+    monkeypatch.setattr(settings, "ADMOB_USD_TO_BRL_RATE", Decimal("5.00"))
+    # eCPM de US$100 -> R$500 (taxa 5.00) -> (500 * 0.5) / 1000 = 0.25.
+    monkeypatch.setattr(admob_client, "get_average_ecpm", lambda target_date, ad_unit_id=None: Decimal("100.00"))
+
+    db = SessionLocal()
+    try:
+        config = update_reward_config_from_admob(db, for_date=date(2026, 7, 24))
+    finally:
+        db.close()
+
+    assert config.avg_ecpm == Decimal("500.00")
+    assert config.value_per_session == Decimal("0.25")
 
 
 # --- collect_mining_session credita o valor vigente (item 5 do pedido) ----
