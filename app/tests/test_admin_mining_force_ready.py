@@ -10,7 +10,6 @@ from app.db.session import SessionLocal
 from app.models.ad_view import AdView, AdViewStatus
 from app.models.cube import Cube, CubeType
 from app.models.mining_session import MiningSession, MiningSessionStatus
-from app.modules.mining.service import MINING_SESSION_DURATION
 
 ADMIN_HEADER = "X-Admin-Token"
 
@@ -130,12 +129,13 @@ def test_force_ready_makes_a_running_session_immediately_collectible(client: Tes
     assert status_after.json()["ready_to_collect"] is True
 
 
-def test_force_ready_does_not_touch_the_production_duration_constant(client: TestClient, monkeypatch):
-    """A garantia central desta abordagem (em vez de uma env var global):
-    MINING_SESSION_DURATION -- usada por toda sessão nova, inclusive de
-    outros usuários em paralelo -- nunca é alterada por este endpoint."""
+def test_force_ready_does_not_touch_the_global_duration_setting(client: TestClient, monkeypatch):
+    """A garantia central desta abordagem (em vez de mudar
+    MINING_SESSION_DURATION_SECONDS globalmente): este endpoint só mexe na
+    sessão indicada -- nunca no setting usado por toda sessão nova de todo
+    usuário."""
     monkeypatch.setattr(settings, "ADMIN_SMOKE_TEST_TOKEN", "the-real-token")
-    original_duration = MINING_SESSION_DURATION
+    original_duration_seconds = settings.MINING_SESSION_DURATION_SECONDS
     session_id = _start_session(client, monkeypatch, "uid-force-ready-2", "force-ready-2@example.com")
 
     client.get(
@@ -144,9 +144,7 @@ def test_force_ready_does_not_touch_the_production_duration_constant(client: Tes
         headers={ADMIN_HEADER: "the-real-token"},
     )
 
-    from app.modules.mining import service as mining_service
-
-    assert mining_service.MINING_SESSION_DURATION == original_duration
+    assert settings.MINING_SESSION_DURATION_SECONDS == original_duration_seconds
 
     db = SessionLocal()
     try:

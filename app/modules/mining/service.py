@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.cube import Cube
 from app.models.ledger_entry import LedgerEntry, LedgerEntryType
 from app.models.mining_session import MiningSession, MiningSessionStatus
@@ -15,10 +16,16 @@ from app.modules.wallet.service import create_ledger_entry
 
 logger = logging.getLogger(__name__)
 
-MINING_SESSION_DURATION = timedelta(hours=2)
-
 # Seção 8: "soma_esperada_de_payouts <= fundo.balance * margem_de_segurança".
 REWARD_FUND_SAFETY_MARGIN = Decimal("0.9")
+
+
+def _mining_session_duration() -> timedelta:
+    """Lida do settings a cada chamada (não congelada num módulo-level
+    constante) -- ver MINING_SESSION_DURATION_SECONDS em app/core/config.py
+    para o porquê (permitir encurtar via env var só para teste manual, sem
+    editar código nem afetar o default de produção)."""
+    return timedelta(seconds=settings.MINING_SESSION_DURATION_SECONDS)
 
 
 class MiningError(Exception):
@@ -107,7 +114,7 @@ def start_mining_session(db: Session, user_id: int, cube_id: int, ad_view_id: in
         cube_id=cube_id,
         ad_view_id=ad_view_id,
         started_at=started_at,
-        ends_at=started_at + MINING_SESSION_DURATION,
+        ends_at=started_at + _mining_session_duration(),
         status=MiningSessionStatus.RUNNING,
     )
     db.add(session)
@@ -142,15 +149,17 @@ def force_session_ready_for_testing(db: Session, session_id: int) -> MiningSessi
 
     Adianta ends_at de UMA sessão específica para o passado -- mesma técnica
     que app/modules/admin/smoke_test.py já usa internamente para não
-    esperar as 2h de verdade. Deliberadamente NÃO existe uma env var tipo
-    "MINING_SESSION_DURATION_SECONDS" para isso: uma constante global
-    mudaria o tempo de mineração de TODO MUNDO em produção enquanto
-    estivesse setada, e esquecê-la ligada seria multiplicar a taxa de saque
-    do fundo de recompensa pra qualquer usuário, não só afetar um teste
-    pontual. Este endpoint só mexe numa sessão por vez, sob demanda, e
-    nunca toca em MINING_SESSION_DURATION nem no status da sessão --
-    "pronto para coletar" continua sendo sempre calculado on-the-fly
-    (now() >= ends_at), nunca persistido (correção v2, seção 5)."""
+    esperar as 2h de verdade. Existe também MINING_SESSION_DURATION_SECONDS
+    (app/core/config.py) para quando o teste precisa ver o ciclo completo
+    rodando em tempo real acelerado (contador, polling), não só destravar
+    uma sessão -- mas prefira este endpoint quando bastar liberar UMA
+    sessão específica: ele só mexe numa sessão por vez, sob demanda, e
+    nunca toca em MINING_SESSION_DURATION_SECONDS nem no status da sessão,
+    enquanto a env var muda o tempo de mineração de TODO MUNDO em produção
+    enquanto estiver setada -- esquecida ligada, multiplica a taxa de saque
+    do fundo de recompensa pra qualquer usuário. "Pronto para coletar"
+    continua sendo sempre calculado on-the-fly (now() >= ends_at), nunca
+    persistido (correção v2, seção 5)."""
     session = db.query(MiningSession).filter(MiningSession.id == session_id).with_for_update().first()
     if session is None:
         return None

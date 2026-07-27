@@ -99,22 +99,24 @@ def register_efi_webhook():
 )
 def force_mining_session_ready(session_id: int = Query(...), db: Session = Depends(get_db)):
     """Adianta ends_at de UMA sessão de mineração específica para o
-    passado, para testes manuais não precisarem esperar as 2h reais de
-    MINING_SESSION_DURATION -- ver docstring completa de
-    force_session_ready_for_testing (app/modules/mining/service.py) para o
-    porquê disto ser um endpoint sob demanda (uma sessão por vez) em vez de
-    uma env var global (ex: "MINING_SESSION_DURATION_SECONDS"): uma
-    constante global mudaria o tempo de mineração de TODO MUNDO em produção
-    enquanto estivesse setada -- esquecida ligada, multiplicaria a taxa de
-    saque do fundo de recompensa pra qualquer usuário, não só afetar um
-    teste pontual.
+    passado, para testes manuais não precisarem esperar as 2h reais -- ver
+    docstring completa de force_session_ready_for_testing
+    (app/modules/mining/service.py). Existe também
+    MINING_SESSION_DURATION_SECONDS (app/core/config.py) para quando o
+    teste precisa ver o ciclo completo em tempo real acelerado, mas
+    prefira este endpoint quando bastar destravar uma sessão específica:
+    ele não afeta ninguém além da sessão indicada, enquanto a env var muda
+    o tempo de mineração de TODO MUNDO em produção enquanto estiver
+    setada -- esquecida ligada, multiplicaria a taxa de saque do fundo de
+    recompensa pra qualquer usuário, não só um teste pontual.
 
     APENAS PARA TESTE MANUAL. Fica 404 em produção a menos que
     ENABLE_DIAGNOSTIC_ENDPOINTS esteja explicitamente ligada (além do token
     ADMIN_SMOKE_TEST_TOKEN) -- ligue só temporariamente pelo dashboard do
     Render enquanto estiver testando, e desligue assim que terminar. Não
-    altera MINING_SESSION_DURATION nem o status da sessão -- "pronto para
-    coletar" continua sempre calculado on-the-fly (now() >= ends_at).
+    altera MINING_SESSION_DURATION_SECONDS nem o status da sessão --
+    "pronto para coletar" continua sempre calculado on-the-fly
+    (now() >= ends_at).
     """
     session = force_session_ready_for_testing(db, session_id)
     if session is None:
