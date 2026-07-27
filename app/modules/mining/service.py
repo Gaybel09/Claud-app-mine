@@ -135,6 +135,31 @@ def get_active_session_for_cube(db: Session, user_id: int, cube_id: int) -> Mini
     )
 
 
+def force_session_ready_for_testing(db: Session, session_id: int) -> MiningSession | None:
+    """SÓ PARA TESTE MANUAL -- ver GET /admin/mining/force-ready
+    (app/modules/admin/router.py), protegida por ENABLE_DIAGNOSTIC_ENDPOINTS
+    + ADMIN_SMOKE_TEST_TOKEN, igual aos outros diagnósticos.
+
+    Adianta ends_at de UMA sessão específica para o passado -- mesma técnica
+    que app/modules/admin/smoke_test.py já usa internamente para não
+    esperar as 2h de verdade. Deliberadamente NÃO existe uma env var tipo
+    "MINING_SESSION_DURATION_SECONDS" para isso: uma constante global
+    mudaria o tempo de mineração de TODO MUNDO em produção enquanto
+    estivesse setada, e esquecê-la ligada seria multiplicar a taxa de saque
+    do fundo de recompensa pra qualquer usuário, não só afetar um teste
+    pontual. Este endpoint só mexe numa sessão por vez, sob demanda, e
+    nunca toca em MINING_SESSION_DURATION nem no status da sessão --
+    "pronto para coletar" continua sendo sempre calculado on-the-fly
+    (now() >= ends_at), nunca persistido (correção v2, seção 5)."""
+    session = db.query(MiningSession).filter(MiningSession.id == session_id).with_for_update().first()
+    if session is None:
+        return None
+    session.ends_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
 def _schedule_ready_notification(session: MiningSession) -> None:
     # Seção 7, passo 4: o worker só agenda o lembrete para ends_at, nunca
     # escreve no status da sessão.

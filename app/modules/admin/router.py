@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.modules.admin.register_webhook import run_register_efi_webhook
 from app.modules.admin.smoke_test import run_pix_smoke_test
+from app.modules.mining.service import force_session_ready_for_testing
 from app.modules.reward.service import update_reward_config_from_admob
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -90,6 +91,35 @@ def register_efi_webhook():
     o webhook porque a URL mudou), e desligue assim que terminar.
     """
     return run_register_efi_webhook()
+
+
+@router.get(
+    "/mining/force-ready",
+    dependencies=[Depends(require_diagnostics_enabled), Depends(require_admin_token)],
+)
+def force_mining_session_ready(session_id: int = Query(...), db: Session = Depends(get_db)):
+    """Adianta ends_at de UMA sessão de mineração específica para o
+    passado, para testes manuais não precisarem esperar as 2h reais de
+    MINING_SESSION_DURATION -- ver docstring completa de
+    force_session_ready_for_testing (app/modules/mining/service.py) para o
+    porquê disto ser um endpoint sob demanda (uma sessão por vez) em vez de
+    uma env var global (ex: "MINING_SESSION_DURATION_SECONDS"): uma
+    constante global mudaria o tempo de mineração de TODO MUNDO em produção
+    enquanto estivesse setada -- esquecida ligada, multiplicaria a taxa de
+    saque do fundo de recompensa pra qualquer usuário, não só afetar um
+    teste pontual.
+
+    APENAS PARA TESTE MANUAL. Fica 404 em produção a menos que
+    ENABLE_DIAGNOSTIC_ENDPOINTS esteja explicitamente ligada (além do token
+    ADMIN_SMOKE_TEST_TOKEN) -- ligue só temporariamente pelo dashboard do
+    Render enquanto estiver testando, e desligue assim que terminar. Não
+    altera MINING_SESSION_DURATION nem o status da sessão -- "pronto para
+    coletar" continua sempre calculado on-the-fly (now() >= ends_at).
+    """
+    session = force_session_ready_for_testing(db, session_id)
+    if session is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "mining session not found")
+    return {"id": session.id, "status": session.status, "ends_at": session.ends_at.isoformat()}
 
 
 @router.get("/update-reward-config", dependencies=[Depends(require_admin_token)])
