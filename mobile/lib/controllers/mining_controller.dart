@@ -61,7 +61,55 @@ class MiningController extends ChangeNotifier {
       final cubes = await cubesApi.listMyCubes();
       cube = cubes.isNotEmpty ? cubes.first : null;
     } on ApiException catch (e) {
+      // Antes desta correção, uma falha aqui só setava errorMessage sem
+      // nunca sair de "stage == idle" -- como a tela mostra um spinner
+      // enquanto cube == null e stage != error, a UI ficava carregando
+      // pra sempre (nunca chegava a mostrar o erro nem o botão de tentar
+      // de novo). Ver também ApiClient.requestTimeout: sem timeout, a
+      // própria chamada podia nunca resolver.
       errorMessage = e.message;
+      stage = CubeCycleStage.error;
+      notifyListeners();
+      return;
+    } catch (_) {
+      errorMessage = 'Não foi possível carregar seu cubo. Tente novamente.';
+      stage = CubeCycleStage.error;
+      notifyListeners();
+      return;
+    }
+
+    final currentCube = cube;
+    if (currentCube == null) {
+      notifyListeners();
+      return;
+    }
+
+    // Seção 7 -- restaura o estado de uma mineração já em andamento (ex: o
+    // usuário trocou de aba e voltou, o que recria este controller do zero
+    // -- ver mobile/lib/screens/cube/cube_screen.dart). Sem isso, a tela
+    // sempre voltava a mostrar "ASSISTIR ANÚNCIO" mesmo com uma sessão
+    // RUNNING de verdade no backend -- e, antes da correção em
+    // start_mining_session (backend), isso permitia iniciar uma segunda
+    // sessão em cima da primeira.
+    try {
+      final active = await miningApi.activeSession(cubeId: currentCube.id);
+      if (active != null) {
+        session = active;
+        final result = await miningApi.status(sessionId: active.id);
+        status = result;
+        if (result.readyToCollect) {
+          stage = CubeCycleStage.readyToCollect;
+        } else {
+          stage = CubeCycleStage.mining;
+          _pollMiningStatus();
+        }
+      }
+    } on ApiException catch (e) {
+      errorMessage = e.message;
+      stage = CubeCycleStage.error;
+    } catch (_) {
+      errorMessage = 'Não foi possível verificar sua mineração em andamento. Tente novamente.';
+      stage = CubeCycleStage.error;
     }
     notifyListeners();
   }

@@ -106,8 +106,121 @@ def test_start_requires_confirmed_ad_view(client: TestClient, monkeypatch):
         db.close()
 
 
+def test_start_rejects_second_session_on_same_cube_while_first_is_running(client: TestClient, monkeypatch):
+    """Falha de segurança corrigida: sem esta checagem, um cliente que
+    perdesse o estado local da tela do cubo (ex: trocar de aba e voltar)
+    podia assistir um NOVO anúncio (ad_view diferente, confirmado) e
+    iniciar uma segunda sessão de mineração concorrente no mesmo cubo,
+    multiplicando a taxa de recompensa pretendida."""
+    user_id = _register_user(client, monkeypatch, "uid-concurrent-cube", "concurrent-cube@example.com")
+    cube_id = _create_cube(user_id)
+    ad_view_1_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
+
+    first = client.post(
+        "/mining/start", json={"cube_id": cube_id, "ad_view_id": ad_view_1_id}, headers=_auth_header()
+    )
+    assert first.status_code == 201
+
+    ad_view_2_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
+    second = client.post(
+        "/mining/start", json={"cube_id": cube_id, "ad_view_id": ad_view_2_id}, headers=_auth_header()
+    )
+    assert second.status_code == 409
+
+    db = SessionLocal()
+    try:
+        running_count = (
+            db.query(MiningSession)
+            .filter(MiningSession.cube_id == cube_id, MiningSession.status == MiningSessionStatus.RUNNING)
+            .count()
+        )
+        assert running_count == 1
+    finally:
+        db.close()
+
+
+def test_start_allows_new_session_after_previous_one_is_collected(client: TestClient, monkeypatch):
+    """A trava é só contra sessão RUNNING concorrente -- depois de coletada,
+    o mesmo cubo pode iniciar um novo ciclo normalmente."""
+    user_id = _register_user(client, monkeypatch, "uid-cycle-again", "cycle-again@example.com")
+    _top_up_reward_fund(Decimal("100.00"))
+    cube_id = _create_cube(user_id)
+    ad_view_1_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
+
+    first = client.post(
+        "/mining/start", json={"cube_id": cube_id, "ad_view_id": ad_view_1_id}, headers=_auth_header()
+    )
+    assert first.status_code == 201
+    session_id = first.json()["id"]
+    _expire_session_now(session_id)
+
+    collect_response = client.post(
+        "/mining/collect",
+        json={"session_id": session_id},
+        headers={**_auth_header(), "Idempotency-Key": "collect-cycle-again-1"},
+    )
+    assert collect_response.status_code == 200
+
+    ad_view_2_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
+    second = client.post(
+        "/mining/start", json={"cube_id": cube_id, "ad_view_id": ad_view_2_id}, headers=_auth_header()
+    )
+    assert second.status_code == 201
+
+
+def test_active_session_returns_null_when_none_running(client: TestClient, monkeypatch):
+    user_id = _register_user(client, monkeypatch, "uid-no-active", "no-active@example.com")
+    cube_id = _create_cube(user_id)
+
+    response = client.get(
+        "/mining/active-session", params={"cube_id": cube_id}, headers=_auth_header()
+    )
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+def test_active_session_returns_running_session(client: TestClient, monkeypatch):
+    """Prova o outro lado da correção: o app consegue descobrir a sessão
+    ativa e restaurar o estado (em vez de voltar pro botão de assistir
+    anúncio) -- ver mobile/lib/controllers/mining_controller.dart."""
+    user_id = _register_user(client, monkeypatch, "uid-active", "active@example.com")
+    cube_id = _create_cube(user_id)
+    ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
+
+    start_response = client.post(
+        "/mining/start", json={"cube_id": cube_id, "ad_view_id": ad_view_id}, headers=_auth_header()
+    )
+    assert start_response.status_code == 201
+    session_id = start_response.json()["id"]
+
+    response = client.get(
+        "/mining/active-session", params={"cube_id": cube_id}, headers=_auth_header()
+    )
+    assert response.status_code == 200
+    assert response.json()["id"] == session_id
+    assert response.json()["status"] == "running"
+
+
+def test_active_session_does_not_leak_across_users(client: TestClient, monkeypatch):
+    owner_id = _register_user(client, monkeypatch, "uid-active-owner", "active-owner@example.com")
+    cube_id = _create_cube(owner_id)
+    ad_view_id = _create_ad_view(owner_id, AdViewStatus.CONFIRMED)
+    client.post("/mining/start", json={"cube_id": cube_id, "ad_view_id": ad_view_id}, headers=_auth_header())
+
+    _register_user(client, monkeypatch, "uid-active-intruder", "active-intruder@example.com")
+    response = client.get(
+        "/mining/active-session", params={"cube_id": cube_id}, headers=_auth_header()
+    )
+    assert response.status_code == 200
+    assert response.json() is None
+
+
 def test_start_rejects_reused_ad_view(client: TestClient, monkeypatch):
+    """Isolado da checagem de sessão concorrente (CubeAlreadyMiningError):
+    o primeiro ciclo é coletado antes da segunda tentativa, então o único
+    motivo de rejeição possível aqui é o reuso do ad_view em si."""
     user_id = _register_user(client, monkeypatch, "uid-reuse", "reuse@example.com")
+    _top_up_reward_fund(Decimal("100.00"))
     cube_id = _create_cube(user_id)
     ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
 
@@ -115,6 +228,14 @@ def test_start_rejects_reused_ad_view(client: TestClient, monkeypatch):
         "/mining/start", json={"cube_id": cube_id, "ad_view_id": ad_view_id}, headers=_auth_header()
     )
     assert first.status_code == 201
+    session_id = first.json()["id"]
+    _expire_session_now(session_id)
+    collect_response = client.post(
+        "/mining/collect",
+        json={"session_id": session_id},
+        headers={**_auth_header(), "Idempotency-Key": "collect-reuse-1"},
+    )
+    assert collect_response.status_code == 200
 
     second = client.post(
         "/mining/start", json={"cube_id": cube_id, "ad_view_id": ad_view_id}, headers=_auth_header()

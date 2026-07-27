@@ -22,6 +22,8 @@ from app.schemas.mining import (
     MiningStatusRead,
 )
 
+MiningSessionReadOrNone = MiningSessionRead | None
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mining", tags=["mining"])
@@ -37,11 +39,27 @@ def start(
         session = service.start_mining_session(db, current_user.id, payload.cube_id, payload.ad_view_id)
     except service.CubeNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "cube not found")
+    except service.CubeAlreadyMiningError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "cube already has an active mining session")
     except service.AdViewNotConfirmedError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "ad_view is not confirmed")
     except service.AdViewAlreadyUsedError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "ad_view already used to start a mining session")
     return session
+
+
+@router.get("/active-session", response_model=MiningSessionReadOrNone)
+def active_session(
+    cube_id: int = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Chamado pelo app ao carregar a tela do cubo, para restaurar o estado
+    de uma mineração em andamento -- ver docstring de
+    service.get_active_session_for_cube. Devolve `null` (200) quando não há
+    sessão RUNNING para este cubo, nunca 404 -- "nenhuma sessão ativa" é um
+    resultado válido, não um erro."""
+    return service.get_active_session_for_cube(db, current_user.id, cube_id)
 
 
 @router.get("/status", response_model=MiningStatusRead)

@@ -135,6 +135,65 @@ void main() {
       expect(find.byKey(const Key('watch_ad_button')), findsOneWidget);
     });
 
+    testWidgets(
+        'shows the mining countdown (not the watch-ad button) when a CubeScreen recreated from '
+        'scratch finds an active session already running on the backend', (tester) async {
+      // Reproduz o bug reportado: trocar de aba e voltar recria o
+      // CubeScreen (e o MiningController) do zero -- ver
+      // mobile/lib/screens/home/home_shell.dart. Sem restaurar o estado a
+      // partir do backend, a tela voltaria mostrando "ASSISTIR ANÚNCIO"
+      // mesmo com uma mineração de verdade em andamento.
+      final cubesApi = FakeCubesApi()
+        ..cubes = [
+          Cube(
+            id: 1,
+            userId: 1,
+            type: 'comum',
+            speed: 1.0,
+            bonusChance: 0.05,
+            acquiredAt: DateTime.now(),
+          ),
+        ];
+      final adsApi = FakeAdsApi();
+      final miningApi = FakeMiningApi();
+      final startedAt = DateTime.now().subtract(const Duration(minutes: 10));
+      miningApi.activeSessionToReturn = MiningSession(
+        id: 77,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 3,
+        startedAt: startedAt,
+        endsAt: startedAt.add(const Duration(hours: 2)),
+        status: 'running',
+      );
+      miningApi.statusNotReadyCount = 999;
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            Provider<CubesApi>.value(value: cubesApi),
+            Provider<AdsApi>.value(value: adsApi),
+            Provider<MiningApi>.value(value: miningApi),
+            Provider<RewardedAdService>.value(value: FakeRewardedAdService()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.dark,
+            home: const CubeScreen(
+              adConfirmationPollInterval: Duration(milliseconds: 10),
+              miningStatusPollInterval: Duration(milliseconds: 10),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('watch_ad_button')), findsNothing);
+      // Não iniciou (nem podia) uma sessão nova -- só descobriu e restaurou
+      // a que já existia.
+      expect(miningApi.startCallCount, 0);
+      expect(adsApi.confirmCallCount, 0);
+    });
+
     testWidgets('does not unlock mining when the RewardedAd is closed before the reward is earned', (tester) async {
       final cubesApi = FakeCubesApi()
         ..cubes = [

@@ -155,6 +155,20 @@ class FakeMiningApi implements MiningApi {
   MiningCollectResult? collectResult;
   Object? throwOnCollect;
 
+  /// Sessão RUNNING já existente para o cubo, simulando GET
+  /// /mining/active-session -- null (default) simula "nenhuma sessão
+  /// ativa", igual a um cubo idle de verdade.
+  int activeSessionCallCount = 0;
+  MiningSession? activeSessionToReturn;
+  Object? throwOnActiveSession;
+
+  @override
+  Future<MiningSession?> activeSession({required int cubeId}) async {
+    activeSessionCallCount++;
+    if (throwOnActiveSession != null) throw throwOnActiveSession!;
+    return activeSessionToReturn;
+  }
+
   @override
   Future<MiningSession> start({required int cubeId, required int adViewId}) async {
     startCallCount++;

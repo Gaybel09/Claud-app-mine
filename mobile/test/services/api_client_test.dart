@@ -102,6 +102,35 @@ void main() {
       expect(capturedRequest!.headers['Idempotency-Key'], 'abc-123');
     });
 
+    test('throws an ApiException instead of hanging forever when the server never responds', () async {
+      // Reproduz o bug reportado: sem timeout nenhum, uma chamada sem
+      // resposta (cold start do Render indo além do esperado, conexão
+      // travada por qualquer outro motivo) ficava esperando indefinidamente
+      // -- a tela de carregamento nunca resolvia sozinha.
+      final mockClient = MockClient((request) async {
+        await Future.delayed(const Duration(seconds: 5));
+        return http.Response('{}', 200);
+      });
+
+      final client = ApiClient(
+        baseUrl: 'https://api.test',
+        httpClient: mockClient,
+        requestTimeout: const Duration(milliseconds: 50),
+      );
+
+      final stopwatch = Stopwatch()..start();
+      await expectLater(
+        () => client.get('/wallet/balance'),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 0)),
+      );
+      stopwatch.stop();
+
+      // Bem menor que os 5s que o mock levaria pra responder de verdade --
+      // prova que o timeout interrompeu a espera, não que só coincidiu de
+      // ser rápido.
+      expect(stopwatch.elapsed, lessThan(const Duration(seconds: 1)));
+    });
+
     test('throws ApiException with the backend detail message on error responses', () async {
       final mockClient = MockClient((request) async {
         return http.Response(

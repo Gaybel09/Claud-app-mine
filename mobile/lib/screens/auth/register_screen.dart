@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_exception.dart';
+import '../../core/auth_exception.dart';
 import '../../core/auth_service.dart';
 import '../../services/auth_api.dart';
 import '../../widgets/app_background.dart';
@@ -22,6 +23,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isSubmitting = false;
   String? _errorMessage;
 
+  /// Distinto de um erro genérico: significa que a conta (no Firebase e/ou
+  /// no backend) muito provavelmente JÁ existe -- o cenário mais comum é
+  /// uma tentativa anterior ter criado a conta de verdade nos dois lados,
+  /// mas o app ter mostrado erro porque a resposta de sucesso não chegou
+  /// (ex: instabilidade de rede, cold start do backend). Nesse caso a ação
+  /// certa não é "tentar de novo criar", é "entrar" -- ver botão abaixo.
+  bool _accountAlreadyExists = false;
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -36,6 +45,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() {
       _isSubmitting = true;
       _errorMessage = null;
+      _accountAlreadyExists = false;
     });
 
     try {
@@ -50,8 +60,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
       await authApi.register(phone: phone.isEmpty ? null : phone);
       // O AuthGate escuta authStateChanges() e troca de tela sozinho assim
       // que o Firebase confirma o cadastro.
+    } on AuthException catch (e) {
+      setState(() {
+        _errorMessage = e.message;
+        _accountAlreadyExists = e.code == 'email-already-in-use';
+      });
     } on ApiException catch (e) {
-      setState(() => _errorMessage = e.message);
+      // 409 = POST /auth/register já tinha criado o usuário antes (mesmo
+      // firebase_uid) -- ver app/modules/auth/router.py. Só acontece na
+      // prática se o passo anterior (Firebase) foi bem-sucedido silenciosamente
+      // (ex: sessão do Firebase já autenticada de uma tentativa anterior).
+      setState(() {
+        _errorMessage = e.statusCode == 409
+            ? 'Você já tem uma conta. Toque em "Já tenho conta" para entrar.'
+            : e.message;
+        _accountAlreadyExists = e.statusCode == 409;
+      });
     } catch (_) {
       setState(() => _errorMessage = 'Não foi possível criar a conta. Tente novamente.');
     } finally {
@@ -121,6 +145,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             )
                           : const Text('CRIAR CONTA'),
                     ),
+                    if (_accountAlreadyExists) ...[
+                      const SizedBox(height: 12),
+                      TextButton(
+                        key: const Key('register_go_to_login_button'),
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Já tenho conta'),
+                      ),
+                    ],
                   ],
                 ),
               ),

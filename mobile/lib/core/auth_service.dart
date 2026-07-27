@@ -1,5 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 
+import 'auth_exception.dart';
+
 /// Identidade mínima do usuário autenticado no Firebase, desacoplada do
 /// pacote firebase_auth para o resto do app (e os testes) não precisarem
 /// conhecer os tipos do Firebase.
@@ -49,11 +51,21 @@ class FirebaseAuthService implements AuthService {
 
   @override
   Future<AppAuthUser> registerWithEmailPassword(String email, String password) async {
-    final credential = await _auth.createUserWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-    return _toAppUser(credential.user)!;
+    try {
+      final credential = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      return _toAppUser(credential.user)!;
+    } on fb.FirebaseAuthException catch (e) {
+      // "email-already-in-use" é o caso prático mais comum de uma tentativa
+      // anterior ter criado a conta no Firebase mesmo o app tendo mostrado
+      // erro (ex: a chamada a POST /auth/register que vem depois travou/
+      // caiu por instabilidade de rede, sem o app nunca confirmar) --
+      // traduzido aqui pra RegisterScreen poder guiar o usuário pro login
+      // em vez de mostrar um erro genérico de "não foi possível criar".
+      throw AuthException(code: e.code, message: _translateAuthError(e.code));
+    }
   }
 
   @override
@@ -74,4 +86,17 @@ class FirebaseAuthService implements AuthService {
 
   @override
   Future<void> signOut() => _auth.signOut();
+
+  String _translateAuthError(String code) {
+    switch (code) {
+      case 'email-already-in-use':
+        return 'Já existe uma conta com esse e-mail. Tente entrar em vez de criar uma nova.';
+      case 'weak-password':
+        return 'Senha muito fraca. Use pelo menos 6 caracteres.';
+      case 'invalid-email':
+        return 'E-mail inválido.';
+      default:
+        return 'Não foi possível criar a conta. Tente novamente.';
+    }
+  }
 }

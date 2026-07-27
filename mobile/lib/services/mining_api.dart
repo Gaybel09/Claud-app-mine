@@ -4,6 +4,12 @@ import '../models/mining_session.dart';
 abstract class MiningApi {
   Future<MiningSession> start({required int cubeId, required int adViewId});
 
+  /// Sessão RUNNING atual para o cubo, se houver -- usada ao carregar a
+  /// tela do cubo para restaurar o estado (cronômetro, "pronto para
+  /// coletar") em vez de sempre assumir idle. `null` quando não há nenhuma
+  /// sessão ativa (não é erro).
+  Future<MiningSession?> activeSession({required int cubeId});
+
   Future<MiningStatus> status({required int sessionId});
 
   Future<MiningCollectResult> collect({
@@ -23,6 +29,16 @@ class HttpMiningApi implements MiningApi {
       'cube_id': cubeId,
       'ad_view_id': adViewId,
     });
+    return MiningSession.fromJson(data as Map<String, dynamic>);
+  }
+
+  @override
+  Future<MiningSession?> activeSession({required int cubeId}) async {
+    final data = await _client.get(
+      '/mining/active-session',
+      query: {'cube_id': cubeId.toString()},
+    );
+    if (data == null) return null;
     return MiningSession.fromJson(data as Map<String, dynamic>);
   }
 

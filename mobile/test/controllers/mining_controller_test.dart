@@ -62,6 +62,82 @@ void main() {
       expect(controller.cube?.id, 1);
     });
 
+    test('loadCube moves to the error stage when listMyCubes fails (never gets stuck loading)', () async {
+      cubesApi.throwOnList = const ApiException(statusCode: 401, message: 'User not registered');
+
+      await controller.loadCube();
+
+      // Antes da correção, um erro aqui só setava errorMessage sem nunca
+      // sair de stage == idle -- como a tela mostra um spinner enquanto
+      // cube == null e stage != error, isso ficava carregando pra sempre.
+      expect(controller.stage, CubeCycleStage.error);
+      expect(controller.errorMessage, 'User not registered');
+    });
+
+    test('loadCube moves to the error stage on a non-ApiException failure (e.g. a timeout)', () async {
+      cubesApi.throwOnList = Exception('timeout');
+
+      await controller.loadCube();
+
+      expect(controller.stage, CubeCycleStage.error);
+      expect(controller.errorMessage, isNotNull);
+    });
+
+    test('loadCube stays idle when there is no active mining session for the cube', () async {
+      miningApi.activeSessionToReturn = null;
+
+      await controller.loadCube();
+
+      expect(controller.stage, CubeCycleStage.idle);
+      expect(controller.session, isNull);
+      expect(miningApi.activeSessionCallCount, 1);
+    });
+
+    test('loadCube restores the mining stage when an active session already exists', () async {
+      // Reproduz o cenário reportado: o usuário trocou de aba e voltou (o
+      // que recria o MiningController do zero), mas já existe uma sessão
+      // RUNNING de verdade no backend -- a tela deve voltar mostrando o
+      // cronômetro, não o botão "ASSISTIR ANÚNCIO".
+      final startedAt = DateTime.now().subtract(const Duration(minutes: 10));
+      miningApi.activeSessionToReturn = MiningSession(
+        id: 99,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 5,
+        startedAt: startedAt,
+        endsAt: startedAt.add(const Duration(hours: 2)),
+        status: 'running',
+      );
+      miningApi.statusNotReadyCount = 999;
+
+      await controller.loadCube();
+
+      expect(controller.stage, CubeCycleStage.mining);
+      expect(controller.session?.id, 99);
+      // watchAd/mining.start nunca são chamados de novo -- a sessão
+      // existente é só descoberta e restaurada, não recriada.
+      expect(miningApi.startCallCount, 0);
+    });
+
+    test('loadCube restores the readyToCollect stage when the active session already matured', () async {
+      final startedAt = DateTime.now().subtract(const Duration(hours: 3));
+      miningApi.activeSessionToReturn = MiningSession(
+        id: 100,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 6,
+        startedAt: startedAt,
+        endsAt: startedAt.add(const Duration(hours: 2)),
+        status: 'running',
+      );
+      miningApi.statusNotReadyCount = 0; // status já vem ready_to_collect=true
+
+      await controller.loadCube();
+
+      expect(controller.stage, CubeCycleStage.readyToCollect);
+      expect(controller.session?.id, 100);
+    });
+
     test('watchAd retries mining/start until the ad is confirmed, then moves to mining', () async {
       await controller.loadCube();
       miningApi.startFailuresBeforeSuccess = 2;

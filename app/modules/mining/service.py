@@ -37,6 +37,15 @@ class AdViewAlreadyUsedError(MiningError):
     pass
 
 
+class CubeAlreadyMiningError(MiningError):
+    """O cubo já tem uma mining_session RUNNING -- ver start_mining_session.
+    Sem esta checagem, um cliente que perdesse o estado local da tela do
+    cubo (ex: trocar de aba e voltar, ver mobile/lib/screens/cube/cube_screen.dart)
+    podia assistir um novo anúncio e iniciar uma SEGUNDA sessão concorrente
+    no mesmo cubo, multiplicando a taxa de recompensa pretendida (1 sessão
+    por cubo por vez) -- falha de segurança, não só um bug de UI."""
+
+
 class SessionNotFoundError(MiningError):
     pass
 
@@ -58,9 +67,27 @@ class MiningStatusResult:
 
 
 def start_mining_session(db: Session, user_id: int, cube_id: int, ad_view_id: int) -> MiningSession:
-    cube = db.query(Cube).filter(Cube.id == cube_id, Cube.user_id == user_id).first()
+    # Lock na linha do cubo (não só um SELECT simples) -- serializa chamadas
+    # concorrentes de start_mining_session para o MESMO cubo, para a checagem
+    # de "já tem sessão rodando" logo abaixo não ter uma janela de corrida
+    # entre duas requisições que passariam na checagem antes de qualquer
+    # uma commitar (mesmo padrão de lock usado em collect_mining_session e
+    # create_ledger_entry).
+    cube = db.query(Cube).filter(Cube.id == cube_id, Cube.user_id == user_id).with_for_update().first()
     if cube is None:
         raise CubeNotFoundError()
+
+    # Falha de segurança corrigida: um cubo só pode ter UMA mining_session
+    # RUNNING por vez. Sem isso, era possível assistir um novo anúncio e
+    # iniciar uma segunda sessão concorrente enquanto a primeira ainda
+    # rodava (ver CubeAlreadyMiningError).
+    already_mining = (
+        db.query(MiningSession)
+        .filter(MiningSession.cube_id == cube_id, MiningSession.status == MiningSessionStatus.RUNNING)
+        .first()
+    )
+    if already_mining is not None:
+        raise CubeAlreadyMiningError()
 
     # Seção 7, passo 3: só libera após o callback assíncrono do SDK confirmar
     # -- nunca com base só no aviso do cliente.
@@ -90,6 +117,22 @@ def start_mining_session(db: Session, user_id: int, cube_id: int, ad_view_id: in
     _schedule_ready_notification(session)
 
     return session
+
+
+def get_active_session_for_cube(db: Session, user_id: int, cube_id: int) -> MiningSession | None:
+    """Usada por GET /mining/active-session (chamada pelo app ao carregar a
+    tela do cubo) para restaurar o estado de uma mineração em andamento --
+    ex: depois do usuário trocar de aba e voltar, o que reseta o estado
+    local do app (ver mobile/lib/controllers/mining_controller.dart). Sem
+    isso, o app não tinha como saber que já existia uma sessão rodando e
+    voltava a mostrar o botão de assistir anúncio -- e, antes da correção em
+    start_mining_session, isso permitia iniciar uma segunda sessão em cima
+    da primeira."""
+    return (
+        db.query(MiningSession)
+        .filter(MiningSession.cube_id == cube_id, MiningSession.user_id == user_id, MiningSession.status == MiningSessionStatus.RUNNING)
+        .first()
+    )
 
 
 def _schedule_ready_notification(session: MiningSession) -> None:
