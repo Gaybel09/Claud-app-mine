@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -13,6 +15,10 @@ class AdminError(Exception):
 
 
 class UserNotFoundError(AdminError):
+    pass
+
+
+class InvalidDepositAmountError(AdminError):
     pass
 
 
@@ -107,6 +113,26 @@ def get_user_devices(db: Session, user_id: int) -> dict:
             for u in sharing_users
         ],
     }
+
+
+def deposit_to_fund(db: Session, amount: Decimal) -> dict:
+    """Aporte manual real no reward_fund -- ao contrário de
+    admin/smoke_test.py's _grant_temporary_fund_headroom (que dá saldo
+    fictício só durante o smoke test e desfaz ao final), este incremento é
+    permanente: usado quando dinheiro de verdade entrou na conta que
+    sustenta os pagamentos (ex: um aporte via Pix na conta Efí que recebe
+    os saques -- ver EFI_PAYER_PIX_KEY), refletindo isso no controle
+    interno de saldo do backend. Não movimenta nenhum dinheiro de verdade
+    sozinho -- é só contabilidade; o aporte real acontece fora do sistema."""
+    if amount <= 0:
+        raise InvalidDepositAmountError("amount must be positive")
+
+    fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).with_for_update().first()
+    fund.balance += amount
+    fund.total_in += amount
+    db.commit()
+    db.refresh(fund)
+    return get_fund_status(db)
 
 
 def get_fund_status(db: Session) -> dict:

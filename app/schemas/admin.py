@@ -51,6 +51,13 @@ class AdminFundRead(BaseModel):
     low_balance_threshold: Decimal
 
 
+class AdminFundDepositRequest(BaseModel):
+    # Positivo, validado em app/modules/admin_panel/service.py -- reflete
+    # dinheiro de verdade que entrou na conta (ex: um aporte via Pix na
+    # conta Efí), então não é algo pra aceitar um valor negativo/zero aqui.
+    amount: Decimal
+
+
 class AdminSharedDeviceUserRead(BaseModel):
     id: int
     email: str

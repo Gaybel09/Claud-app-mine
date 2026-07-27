@@ -7,6 +7,7 @@ from app.models.withdrawal import WithdrawalStatus
 from app.modules.admin_panel import service
 from app.modules.pix import service as pix_service
 from app.schemas.admin import (
+    AdminFundDepositRequest,
     AdminFundRead,
     AdminUserDevicesRead,
     AdminUserListRead,
@@ -98,3 +99,16 @@ def approve_withdrawal(withdrawal_id: int, db: Session = Depends(get_db)):
 @router.get("/fund", response_model=AdminFundRead)
 def fund_status(db: Session = Depends(get_db)):
     return service.get_fund_status(db)
+
+
+@router.post("/fund/deposit", response_model=AdminFundRead)
+def deposit_to_fund(payload: AdminFundDepositRequest, db: Session = Depends(get_db)):
+    """Registra um aporte real no reward_fund (ex: dinheiro que entrou na
+    conta Efí que sustenta os pagamentos) -- ver docstring de
+    service.deposit_to_fund. Só contabilidade interna; não movimenta
+    dinheiro sozinho. Exige login de admin de verdade (mesma proteção das
+    outras rotas deste painel), não o ADMIN_SMOKE_TEST_TOKEN."""
+    try:
+        return service.deposit_to_fund(db, payload.amount)
+    except service.InvalidDepositAmountError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "amount must be positive")

@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -5,7 +6,10 @@ from fastapi.testclient import TestClient
 from app.core import firebase
 from app.core.efi import EfiApiError
 from app.db.session import SessionLocal
+from app.models.ad_view import AdView, AdViewStatus
+from app.models.cube import Cube, CubeType
 from app.models.ledger_entry import LedgerEntryType
+from app.models.mining_session import MiningSession
 from app.models.reward_fund import SINGLETON_ID, RewardFund
 from app.models.user import User
 from app.modules.pix import service as pix_service
@@ -344,6 +348,141 @@ def test_fund_status_reports_low_balance_alert(client: TestClient, monkeypatch):
     assert Decimal(healthy_body["balance"]) == Decimal("100.00")
     assert Decimal(healthy_body["total_in"]) == Decimal("100.00")
     assert healthy_body["low_balance_alert"] is False
+
+
+# --- POST /admin/fund/deposit -------------------------------------------------
+
+
+def test_deposit_to_fund_increases_balance_and_total_in(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-deposit", "admin-deposit@example.com")
+
+    response = client.post("/admin/fund/deposit", json={"amount": "250.00"}, headers=_auth_header())
+    assert response.status_code == 200
+    body = response.json()
+    assert Decimal(body["balance"]) == Decimal("250.00")
+    assert Decimal(body["total_in"]) == Decimal("250.00")
+
+    db = SessionLocal()
+    try:
+        fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
+        assert fund.balance == Decimal("250.00")
+        assert fund.total_in == Decimal("250.00")
+    finally:
+        db.close()
+
+
+def test_deposit_to_fund_accumulates_across_multiple_deposits(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-deposit-2", "admin-deposit-2@example.com")
+
+    client.post("/admin/fund/deposit", json={"amount": "100.00"}, headers=_auth_header())
+    second = client.post("/admin/fund/deposit", json={"amount": "50.00"}, headers=_auth_header())
+
+    assert Decimal(second.json()["balance"]) == Decimal("150.00")
+    assert Decimal(second.json()["total_in"]) == Decimal("150.00")
+
+
+def test_deposit_to_fund_does_not_touch_total_out(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-deposit-3", "admin-deposit-3@example.com")
+
+    db = SessionLocal()
+    try:
+        fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
+        fund.balance = Decimal("10.00")
+        fund.total_out = Decimal("40.00")
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post("/admin/fund/deposit", json={"amount": "60.00"}, headers=_auth_header())
+    assert Decimal(response.json()["balance"]) == Decimal("70.00")
+    assert Decimal(response.json()["total_out"]) == Decimal("40.00")
+
+
+def test_deposit_to_fund_rejects_zero_or_negative_amount(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-deposit-4", "admin-deposit-4@example.com")
+
+    zero_response = client.post("/admin/fund/deposit", json={"amount": "0"}, headers=_auth_header())
+    assert zero_response.status_code == 400
+
+    negative_response = client.post(
+        "/admin/fund/deposit", json={"amount": "-10.00"}, headers=_auth_header()
+    )
+    assert negative_response.status_code == 400
+
+    db = SessionLocal()
+    try:
+        fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
+        assert fund.balance == Decimal("0")
+    finally:
+        db.close()
+
+
+def test_deposit_to_fund_requires_admin_login(client: TestClient, monkeypatch):
+    _register_user(client, monkeypatch, "uid-not-admin-deposit", "not-admin-deposit@example.com")
+
+    response = client.post("/admin/fund/deposit", json={"amount": "100.00"}, headers=_auth_header())
+    assert response.status_code == 403
+
+
+def test_deposit_to_fund_unlocks_the_full_collect_flow(client: TestClient, monkeypatch):
+    """Prova o cenário real reportado: coleta falhando com 'reward fund
+    unavailable' por saldo insuficiente, resolvido depositando no fundo
+    via este endpoint -- sem precisar inserir nada direto no banco."""
+    _register_admin(client, monkeypatch, "uid-admin-deposit-5", "admin-deposit-5@example.com")
+
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-collect-flow", "collect-flow@example.com"))
+    register_response = client.post("/auth/register", json={}, headers=_auth_header())
+    user_id = register_response.json()["id"]
+
+    db = SessionLocal()
+    try:
+        cube = Cube(user_id=user_id, type=CubeType.COMUM, speed=Decimal("1.00"), bonus_chance=Decimal("0.05"))
+        db.add(cube)
+        db.commit()
+        db.refresh(cube)
+        cube_id = cube.id
+
+        ad_view = AdView(user_id=user_id, ad_network="admob", status=AdViewStatus.CONFIRMED)
+        db.add(ad_view)
+        db.commit()
+        db.refresh(ad_view)
+        ad_view_id = ad_view.id
+    finally:
+        db.close()
+
+    start_response = client.post(
+        "/mining/start", json={"cube_id": cube_id, "ad_view_id": ad_view_id}, headers=_auth_header()
+    )
+    session_id = start_response.json()["id"]
+
+    db = SessionLocal()
+    try:
+        session = db.query(MiningSession).filter(MiningSession.id == session_id).first()
+        session.ends_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+    finally:
+        db.close()
+
+    # reward_fund começa em 0 (fixture) -- a coleta falha por saldo insuficiente.
+    failing_collect = client.post(
+        "/mining/collect",
+        json={"session_id": session_id},
+        headers={**_auth_header(), "Idempotency-Key": "collect-flow-1"},
+    )
+    assert failing_collect.status_code == 503
+
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-deposit-5", "admin-deposit-5@example.com"))
+    deposit_response = client.post("/admin/fund/deposit", json={"amount": "100.00"}, headers=_auth_header())
+    assert deposit_response.status_code == 200
+
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-collect-flow", "collect-flow@example.com"))
+    successful_collect = client.post(
+        "/mining/collect",
+        json={"session_id": session_id},
+        headers={**_auth_header(), "Idempotency-Key": "collect-flow-1"},
+    )
+    assert successful_collect.status_code == 200
+    assert successful_collect.json()["status"] == "collected"
 
 
 # --- GET /admin/users/{id}/devices -------------------------------------------
