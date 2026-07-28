@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import ValidationError
 from slowapi.util import get_remote_address
@@ -16,7 +18,15 @@ from app.models.user import User
 from app.modules.pix import service
 from app.schemas.pix import PixWebhookRequest, PixWithdrawRequest, WithdrawalRead
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/pix", tags=["pix"])
+
+# Truncamento defensivo do corpo cru logado -- não deveria conter nada
+# sensível além de chave Pix/valor/idEnvio (mesmo dado já visível num saque
+# normal), mas por precaução (mesmo padrão de MAX_FAILURE_REASON_LENGTH em
+# app/modules/pix/service.py).
+MAX_LOGGED_WEBHOOK_BODY_LENGTH = 2000
 
 
 @router.get("/health")
@@ -115,6 +125,21 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     # continua validando estrito e sendo processado normalmente -- nunca
     # enfraquecemos a validação desse caso.
     raw_body = await request.body()
+    # .warning() (não .info()) -- este app não configura nível de logging em
+    # lugar nenhum, então .info() nunca aparece nos logs (ver comentário
+    # equivalente em app/modules/pix/service.py/admin_reconcile_withdrawal).
+    # Logado ANTES de qualquer validação/early-return -- inclusive para os
+    # dois casos tratados como "ping" abaixo -- porque essa é exatamente a
+    # única prova que existiria de a Efí ter chamado esta rota, com qual
+    # corpo, se um saque específico ficar preso sem nunca confirmar (ex: um
+    # payload real que não bate com o formato esperado seria hoje tratado
+    # como ping silenciosamente, sem deixar rastro nenhum).
+    logger.warning(
+        "Pix webhook received on %s (%d bytes): %s",
+        request.url.path,
+        len(raw_body),
+        raw_body[:MAX_LOGGED_WEBHOOK_BODY_LENGTH].decode("utf-8", errors="replace"),
+    )
     if not raw_body:
         return {"status": "ok"}
     try:
@@ -133,5 +158,12 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         db, id_envio=id_envio, efi_status=payload.status, failure_reason=failure_reason
     )
     if withdrawal is None:
+        logger.warning("Pix webhook: no withdrawal found for efi_id_envio=%s", id_envio)
         raise HTTPException(status.HTTP_404_NOT_FOUND, "withdrawal not found")
+    logger.warning(
+        "Pix webhook applied efi_status=%s to withdrawal %s (new status=%s)",
+        payload.status,
+        withdrawal.id,
+        withdrawal.status,
+    )
     return {"status": "ok"}

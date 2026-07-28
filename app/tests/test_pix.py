@@ -251,6 +251,35 @@ def test_webhook_real_payload_missing_id_envio_still_rejected(client: TestClient
     assert response.status_code == 400
 
 
+def test_webhook_logs_the_raw_body_it_received(client: TestClient, monkeypatch, caplog):
+    """Sem isso, uma notificação real que a Efí manda mas que o handler
+    trata (por engano ou por um formato inesperado) como "ping" de
+    verificação não deixa NENHUM rastro -- impossível provar depois se a
+    Efí chamou ou não. .warning() (não .info()): este app não configura
+    nível de logging em lugar nenhum, e .info() nunca aparece nos logs."""
+    import logging as _logging
+
+    caplog.set_level(_logging.WARNING, logger="app.modules.pix.router")
+
+    user_id = _register_user(client, monkeypatch, "uid-pix-webhook-log", "pix-webhook-log@example.com")
+    _credit_balance(user_id, Decimal("100.00"))
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+    client.post(
+        "/pix/withdraw",
+        json={"amount": "1.00"},
+        headers={**_auth_header(), "Idempotency-Key": "withdraw-webhook-log-1"},
+    )
+
+    webhook_response = client.post(
+        "/pix/webhook/pix",
+        json={"status": "REALIZADO", "gnExtras": {"idEnvio": _efi_id_envio_for("withdraw-webhook-log-1")}},
+    )
+    assert webhook_response.status_code == 200
+
+    assert any("Pix webhook received" in record.message for record in caplog.records)
+    assert any("Pix webhook applied" in record.message for record in caplog.records)
+
+
 def test_webhook_confirms_and_debits_balance(client: TestClient, monkeypatch):
     user_id = _register_user(client, monkeypatch, "uid-pix-webhook", "pix-webhook@example.com")
     _credit_balance(user_id, Decimal("100.00"))
