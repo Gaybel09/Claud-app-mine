@@ -7,7 +7,11 @@ from app.core.admob import AdMobApiError, AdMobConfigurationError
 from app.core.efi import EfiApiError, EfiConfigurationError, efi_client
 from app.db.session import SessionLocal
 from app.models.withdrawal import Withdrawal, WithdrawalStatus
-from app.modules.pix.service import RECONCILE_AFTER_MINUTES, apply_efi_status
+from app.modules.pix.service import (
+    RECONCILE_AFTER_MINUTES,
+    apply_efi_status,
+    failure_reason_from_get_status,
+)
 from app.modules.reward.service import update_reward_config_from_admob
 from app.workers.celery_app import celery_app
 
@@ -27,9 +31,15 @@ def reconcile_withdrawal(db: Session, withdrawal: Withdrawal) -> None:
     except (EfiApiError, EfiConfigurationError):
         logger.warning("failed to reconcile withdrawal %s", withdrawal.id, exc_info=True)
         return
+    logger.info("Efi get_send_status response for withdrawal %s: %s", withdrawal.id, result)
     efi_status = result.get("status")
     if efi_status:
-        apply_efi_status(db, id_envio=withdrawal.efi_id_envio, efi_status=efi_status)
+        apply_efi_status(
+            db,
+            id_envio=withdrawal.efi_id_envio,
+            efi_status=efi_status,
+            failure_reason=failure_reason_from_get_status(result),
+        )
 
 
 @celery_app.task(name="mining.send_ready_notification")

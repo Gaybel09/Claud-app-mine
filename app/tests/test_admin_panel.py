@@ -423,6 +423,105 @@ def test_reconcile_withdrawal_returns_503_when_efi_query_fails(client: TestClien
     assert response.status_code == 503
 
 
+def test_reconcile_withdrawal_populates_failure_reason_from_efi_error(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-reconcile-5", "admin-reconcile-5@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-reconcile-5", "reconcile-5@example.com")
+    _credit_balance(user_id, Decimal("100.00"))
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-5", "reconcile-5@example.com"))
+    withdraw_response = client.post(
+        "/pix/withdraw",
+        json={"amount": "10.00"},
+        headers={**_auth_header(), "Idempotency-Key": "admin-reconcile-5"},
+    )
+    withdrawal_id = withdraw_response.json()["id"]
+
+    monkeypatch.setattr(
+        pix_service.efi_client,
+        "get_send_status",
+        lambda id_envio: {
+            "status": "NAO_REALIZADO",
+            "gnExtras": {"idEnvio": id_envio, "error": {"codigo": "PIX_KEY_INVALID", "motivo": "chave Pix inválida"}},
+        },
+    )
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-reconcile-5", "admin-reconcile-5@example.com"))
+    response = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["failure_reason"] == "PIX_KEY_INVALID: chave Pix inválida"
+
+
+def test_reconcile_withdrawal_backfills_failure_reason_when_previously_null(client: TestClient, monkeypatch):
+    """Reconciliações antigas (antes deste fix) podiam marcar failed sem
+    capturar o motivo -- uma nova chamada de reconcile deve reconsultar a
+    Efí e preencher o motivo, mesmo com o saque já em estado terminal."""
+    _register_admin(client, monkeypatch, "uid-admin-reconcile-6", "admin-reconcile-6@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-reconcile-6", "reconcile-6@example.com")
+    _credit_balance(user_id, Decimal("100.00"))
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-6", "reconcile-6@example.com"))
+    withdraw_response = client.post(
+        "/pix/withdraw",
+        json={"amount": "10.00"},
+        headers={**_auth_header(), "Idempotency-Key": "admin-reconcile-6"},
+    )
+    withdrawal_id = withdraw_response.json()["id"]
+
+    monkeypatch.setattr(
+        pix_service.efi_client, "get_send_status", lambda id_envio: {"status": "NAO_REALIZADO"}
+    )
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-reconcile-6", "admin-reconcile-6@example.com"))
+    first = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+    assert first.json()["status"] == "failed"
+    assert first.json()["failure_reason"] is None
+
+    monkeypatch.setattr(
+        pix_service.efi_client,
+        "get_send_status",
+        lambda id_envio: {
+            "status": "NAO_REALIZADO",
+            "gnExtras": {"idEnvio": id_envio, "error": {"codigo": "SALDO_INSUFICIENTE", "motivo": "saldo insuficiente na conta pagadora"}},
+        },
+    )
+    second = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+    assert second.status_code == 200
+    assert second.json()["status"] == "failed"
+    assert second.json()["failure_reason"] == "SALDO_INSUFICIENTE: saldo insuficiente na conta pagadora"
+
+
+def test_reconcile_withdrawal_does_not_requery_once_failure_reason_is_set(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-reconcile-7", "admin-reconcile-7@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-reconcile-7", "reconcile-7@example.com")
+    _credit_balance(user_id, Decimal("100.00"))
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-7", "reconcile-7@example.com"))
+    withdraw_response = client.post(
+        "/pix/withdraw",
+        json={"amount": "10.00"},
+        headers={**_auth_header(), "Idempotency-Key": "admin-reconcile-7"},
+    )
+    withdrawal_id = withdraw_response.json()["id"]
+
+    monkeypatch.setattr(
+        pix_service.efi_client,
+        "get_send_status",
+        lambda id_envio: {
+            "status": "NAO_REALIZADO",
+            "gnExtras": {"idEnvio": id_envio, "error": {"codigo": "X", "motivo": "y"}},
+        },
+    )
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-reconcile-7", "admin-reconcile-7@example.com"))
+    client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+
+    def _fail_if_called(id_envio):
+        raise AssertionError("should not query Efi again once failure_reason is already set")
+
+    monkeypatch.setattr(pix_service.efi_client, "get_send_status", _fail_if_called)
+    response = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+    assert response.status_code == 200
+    assert response.json()["failure_reason"] == "X: y"
+
+
 def test_reconcile_withdrawal_not_found_returns_404(client: TestClient, monkeypatch):
     _register_admin(client, monkeypatch, "uid-admin-reconcile-404", "admin-reconcile-404@example.com")
 

@@ -33,6 +33,23 @@ def _describe_efi_failure(exc: EfiApiError | EfiConfigurationError) -> str:
     return reason[:MAX_FAILURE_REASON_LENGTH]
 
 
+def failure_reason_from_get_status(result: dict) -> str | None:
+    """Extrai o motivo de falha do corpo cru devolvido por
+    EfiClient.get_send_status -- mesmo campo gnExtras.error usado pelo
+    webhook (ver PixWebhookGnExtrasError em app/schemas/pix.py), só que aqui
+    o corpo não passa pela validação Pydantic do webhook, então lê como
+    dict puro. Sem isso, um saque que a reconciliação (worker periódico ou
+    admin_reconcile_withdrawal) marca como NAO_REALIZADO fica com
+    failure_reason nulo -- só o webhook populava esse campo até aqui."""
+    gn_extras = result.get("gnExtras") or {}
+    error = gn_extras.get("error") or {}
+    codigo = error.get("codigo")
+    motivo = error.get("motivo")
+    if codigo is None and motivo is None:
+        return None
+    return f"{codigo}: {motivo}"[:MAX_FAILURE_REASON_LENGTH]
+
+
 class PixError(Exception):
     """Base para os erros de negócio do módulo pix."""
 
@@ -168,14 +185,23 @@ def apply_efi_status(
     de novo.
 
     failure_reason (opcional): motivo reportado pela Efí quando
-    efi_status == "NAO_REALIZADO" (ex: payload.gnExtras.error do webhook),
-    guardado em withdrawals.failure_reason para diagnóstico.
+    efi_status == "NAO_REALIZADO" (ex: payload.gnExtras.error do webhook).
+    Se o withdrawal já estiver failed mas sem failure_reason gravado ainda
+    (ex: uma reconciliação anterior que rodou antes desta função aceitar
+    esse parâmetro), esta chamada faz só o backfill do motivo, sem tentar
+    reaplicar a transição de status.
     """
     withdrawal = (
         db.query(Withdrawal).filter(Withdrawal.efi_id_envio == id_envio).with_for_update().first()
     )
     if withdrawal is None:
         return None
+
+    if withdrawal.status == WithdrawalStatus.FAILED and withdrawal.failure_reason is None and failure_reason:
+        withdrawal.failure_reason = failure_reason[:MAX_FAILURE_REASON_LENGTH]
+        db.commit()
+        db.refresh(withdrawal)
+        return withdrawal
 
     if withdrawal.status in (WithdrawalStatus.PAID, WithdrawalStatus.FAILED):
         return withdrawal
@@ -248,12 +274,19 @@ def admin_reconcile_withdrawal(db: Session, withdrawal_id: int) -> Withdrawal:
     se deu erro, não só um log silencioso.
 
     Levanta WithdrawalNotFoundError se o id não existir. Idempotente: se o
-    saque já estiver em estado terminal (paid/failed), devolve sem
-    consultar a Efí de novo."""
+    saque já estiver pago, devolve sem consultar a Efí de novo (nunca
+    reconsulta um saque já pago, mesmo que apply_efi_status já seja seguro
+    contra debitar duas vezes -- uma camada extra de cautela). Se já
+    estiver failed mas com failure_reason ainda nulo (reconciliações
+    anteriores a este fix não capturavam o motivo -- ver
+    failure_reason_from_get_status), reconsulta só para preencher o
+    motivo, sem tentar mudar o status de novo."""
     withdrawal = db.query(Withdrawal).filter(Withdrawal.id == withdrawal_id).first()
     if withdrawal is None:
         raise WithdrawalNotFoundError()
-    if withdrawal.status in (WithdrawalStatus.PAID, WithdrawalStatus.FAILED):
+    if withdrawal.status == WithdrawalStatus.PAID:
+        return withdrawal
+    if withdrawal.status == WithdrawalStatus.FAILED and withdrawal.failure_reason is not None:
         return withdrawal
 
     try:
@@ -261,9 +294,16 @@ def admin_reconcile_withdrawal(db: Session, withdrawal_id: int) -> Withdrawal:
     except (EfiApiError, EfiConfigurationError) as exc:
         raise EfiReconcileError(_describe_efi_failure(exc)) from exc
 
+    logger.info("Efi get_send_status response for withdrawal %s: %s", withdrawal.id, result)
+
     efi_status = result.get("status")
     if efi_status:
-        apply_efi_status(db, id_envio=withdrawal.efi_id_envio, efi_status=efi_status)
+        apply_efi_status(
+            db,
+            id_envio=withdrawal.efi_id_envio,
+            efi_status=efi_status,
+            failure_reason=failure_reason_from_get_status(result),
+        )
 
     db.refresh(withdrawal)
     return withdrawal
