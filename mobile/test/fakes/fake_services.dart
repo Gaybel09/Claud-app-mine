@@ -7,18 +7,20 @@ import 'package:cubemine_pix/models/app_user.dart';
 import 'package:cubemine_pix/models/cube.dart';
 import 'package:cubemine_pix/models/ledger_entry.dart';
 import 'package:cubemine_pix/models/mining_session.dart';
+import 'package:cubemine_pix/models/withdrawal.dart';
 import 'package:cubemine_pix/services/ads_api.dart';
 import 'package:cubemine_pix/services/auth_api.dart';
 import 'package:cubemine_pix/services/cubes_api.dart';
 import 'package:cubemine_pix/services/mining_api.dart';
+import 'package:cubemine_pix/services/pix_api.dart';
 import 'package:cubemine_pix/services/rewarded_ad_service.dart';
 import 'package:cubemine_pix/services/wallet_api.dart';
 
-AppUser fakeAppUser({String email = 'user@example.com'}) => AppUser(
+AppUser fakeAppUser({String email = 'user@example.com', String? pixKey}) => AppUser(
       id: 1,
       email: email,
       phone: null,
-      pixKey: null,
+      pixKey: pixKey,
       kycStatus: 'pending',
       createdAt: DateTime.now(),
       isBlocked: false,
@@ -71,6 +73,7 @@ class FakeAuthApi implements AuthApi {
   bool loginCalled = false;
   bool registerCalled = false;
   String? registeredPhone;
+  String? pixKeyToReturn;
   Object? throwOnLogin;
   Object? throwOnRegister;
 
@@ -78,7 +81,7 @@ class FakeAuthApi implements AuthApi {
   Future<AppUser> login() async {
     loginCalled = true;
     if (throwOnLogin != null) throw throwOnLogin!;
-    return fakeAppUser();
+    return fakeAppUser(pixKey: pixKeyToReturn);
   }
 
   @override
@@ -217,5 +220,46 @@ class FakeWalletApi implements WalletApi {
   Future<Statement> getStatement({int page = 1, int pageSize = 20}) async {
     if (throwOnStatement != null) throw throwOnStatement!;
     return statement ?? const Statement(items: [], page: 1, pageSize: 20, total: 0);
+  }
+}
+
+/// Fake controlável de PixApi: [withdrawResultsQueue] permite simular o
+/// mesmo saque mudando de status entre chamadas sucessivas de
+/// listWithdrawals (ex: "processing" na primeira consulta, "paid" na
+/// segunda), simulando o backend confirmando o pagamento entre um tick de
+/// polling e outro do WithdrawController.
+class FakePixApi implements PixApi {
+  int withdrawCallCount = 0;
+  Withdrawal? withdrawResult;
+  Object? throwOnWithdraw;
+  String? lastIdempotencyKey;
+  double? lastAmount;
+  String? lastPixKey;
+
+  int listWithdrawalsCallCount = 0;
+  List<List<Withdrawal>> listWithdrawalsQueue = [];
+  Object? throwOnListWithdrawals;
+
+  @override
+  Future<Withdrawal> withdraw({
+    required double amount,
+    String? pixKey,
+    required String idempotencyKey,
+  }) async {
+    withdrawCallCount++;
+    lastAmount = amount;
+    lastPixKey = pixKey;
+    lastIdempotencyKey = idempotencyKey;
+    if (throwOnWithdraw != null) throw throwOnWithdraw!;
+    return withdrawResult!;
+  }
+
+  @override
+  Future<List<Withdrawal>> listWithdrawals() async {
+    listWithdrawalsCallCount++;
+    if (throwOnListWithdrawals != null) throw throwOnListWithdrawals!;
+    if (listWithdrawalsQueue.isEmpty) return const [];
+    final index = (listWithdrawalsCallCount - 1).clamp(0, listWithdrawalsQueue.length - 1);
+    return listWithdrawalsQueue[index];
   }
 }
