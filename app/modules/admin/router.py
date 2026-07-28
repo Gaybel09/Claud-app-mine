@@ -99,16 +99,13 @@ def register_efi_webhook():
 )
 def force_mining_session_ready(session_id: int = Query(...), db: Session = Depends(get_db)):
     """Adianta ends_at de UMA sessão de mineração específica para o
-    passado, para testes manuais não precisarem esperar as 2h reais -- ver
-    docstring completa de force_session_ready_for_testing
-    (app/modules/mining/service.py). Existe também
-    MINING_SESSION_DURATION_SECONDS (app/core/config.py) para quando o
-    teste precisa ver o ciclo completo em tempo real acelerado, mas
-    prefira este endpoint quando bastar destravar uma sessão específica:
-    ele não afeta ninguém além da sessão indicada, enquanto a env var muda
-    o tempo de mineração de TODO MUNDO em produção enquanto estiver
-    setada -- esquecida ligada, multiplicaria a taxa de saque do fundo de
-    recompensa pra qualquer usuário, não só um teste pontual.
+    passado, para testes manuais não precisarem esperar os 30min reais
+    (MINING_SESSION_DURATION_SECONDS, app/core/config.py) -- ver docstring
+    completa de force_session_ready_for_testing
+    (app/modules/mining/service.py). Prefira este endpoint quando bastar
+    destravar uma sessão específica: ele não afeta ninguém além da sessão
+    indicada, enquanto mudar MINING_SESSION_DURATION_SECONDS direto afeta
+    o tempo de mineração de TODO MUNDO em produção.
 
     APENAS PARA TESTE MANUAL. Fica 404 em produção a menos que
     ENABLE_DIAGNOSTIC_ENDPOINTS esteja explicitamente ligada (além do token

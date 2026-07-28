@@ -108,11 +108,11 @@ def test_start_requires_confirmed_ad_view(client: TestClient, monkeypatch):
 
 
 def test_start_uses_configured_duration_when_overridden(client: TestClient, monkeypatch):
-    """MINING_SESSION_DURATION_SECONDS (default 7200 = 2h de produção) só
-    existe para permitir encurtar via env var durante teste manual, sem
-    editar código -- ver app/core/config.py. Confirma que start_mining_session
-    lê o valor atual do settings a cada chamada, não uma constante
-    congelada no import do módulo."""
+    """MINING_SESSION_DURATION_SECONDS (default 1800 = 30min de produção)
+    continua configurável mesmo sendo o valor definitivo -- ver
+    app/core/config.py. Confirma que start_mining_session lê o valor atual
+    do settings a cada chamada, não uma constante congelada no import do
+    módulo."""
     monkeypatch.setattr(settings, "MINING_SESSION_DURATION_SECONDS", 120)
     user_id = _register_user(client, monkeypatch, "uid-short-duration", "short-duration@example.com")
     cube_id = _create_cube(user_id)
@@ -130,8 +130,8 @@ def test_start_uses_configured_duration_when_overridden(client: TestClient, monk
     assert (ends_at - started_at) == timedelta(seconds=120)
 
 
-def test_start_defaults_to_two_hours_when_not_overridden(client: TestClient, monkeypatch):
-    assert settings.MINING_SESSION_DURATION_SECONDS == 7200
+def test_start_defaults_to_thirty_minutes_when_not_overridden(client: TestClient, monkeypatch):
+    assert settings.MINING_SESSION_DURATION_SECONDS == 1800
     user_id = _register_user(client, monkeypatch, "uid-default-duration", "default-duration@example.com")
     cube_id = _create_cube(user_id)
     ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
@@ -143,7 +143,7 @@ def test_start_defaults_to_two_hours_when_not_overridden(client: TestClient, mon
 
     started_at = datetime.fromisoformat(response.json()["started_at"].replace("Z", "+00:00"))
     ends_at = datetime.fromisoformat(response.json()["ends_at"].replace("Z", "+00:00"))
-    assert (ends_at - started_at) == timedelta(hours=2)
+    assert (ends_at - started_at) == timedelta(minutes=30)
 
 
 def test_start_rejects_second_session_on_same_cube_while_first_is_running(client: TestClient, monkeypatch):

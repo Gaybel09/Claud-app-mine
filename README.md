@@ -131,6 +131,48 @@ só do webhook. Esse worker/beat ainda não está no `render.yaml` -- precisa
 de um serviço `celery -A app.workers.celery_app worker` e outro `celery -A
 app.workers.celery_app beat` rodando além da API.
 
+### Migração de homologação para produção
+
+Passo a passo pra virar a chave de sandbox pra produção de verdade
+(dinheiro real):
+
+1. **Gere o certificado de produção** no painel Efí -> "Meus certificados"
+   (aplicação de produção, não a de homologação) -- baixa um `.p12`.
+2. **Converta pra PEM combinado**:
+   ```bash
+   openssl pkcs12 -in producao.p12 -out producao.pem -nodes -legacy -passin pass:
+   ```
+   (`-passin pass:` funciona se a Efí exportou com senha vazia -- comum;
+   se pedir senha, tire o `-passin pass:` e digite quando solicitado). O
+   `-legacy` é necessário no OpenSSL 3.x porque o `.p12` da Efí usa
+   3DES/SHA1 (algoritmo antigo). Confirme que o resultado tem exatamente
+   um bloco `BEGIN CERTIFICATE` e um `BEGIN PRIVATE KEY`.
+3. **No dashboard do Render**, atualize (não precisa mexer no
+   `render.yaml` -- essas 3 variáveis já são `sync: false`, geridas só
+   pelo dashboard):
+   - `EFI_CLIENT_ID` -> o Client ID da aplicação de **produção**
+   - `EFI_CLIENT_SECRET` -> o Client Secret da aplicação de **produção**
+   - `EFI_CERTIFICATE_PEM` -> conteúdo do `producao.pem` (o texto inteiro,
+     dos dois `-----BEGIN...-----END-----`)
+   - `EFI_PAYER_PIX_KEY` -> a chave Pix real da conta Efí de produção que
+     paga os saques (**não** é a mesma de homologação -- confira antes)
+4. **Mude `EFI_SANDBOX` para `false`** -- essa é a única variável que
+   *não* é `sync: false`, então precisa de uma mudança no `render.yaml`
+   (commitada e com push) para valer.
+5. **Re-registre o webhook** contra o ambiente de produção:
+   `GET /admin/register-efi-webhook` (com `ENABLE_DIAGNOSTIC_ENDPOINTS`
+   ligada temporariamente) -- o webhook registrado para homologação NÃO
+   vale pra produção, são hosts Efí diferentes.
+6. **Valide sem mover dinheiro**: `GET /pix/health` autentica de verdade
+   contra a Efí de produção sem fazer nenhum saque -- rode isso antes de
+   qualquer saque real. **Não rode `GET /admin/smoke-test/pix` em
+   produção** -- ele sempre manda o saque de teste para
+   `efipay@sejaefi.com.br`, a chave de homologação, que não existe/não é
+   confirmada no ambiente de produção (só serve pra sandbox).
+
+Depois do passo 4, qualquer saque real (`POST /pix/withdraw`) passa a
+mover dinheiro de verdade -- confirme os passos 1-3 e 5-6 antes.
+
 ### Diagnóstico: `GET /admin/smoke-test/pix`
 
 Roda, dentro do próprio processo do backend (sem nenhuma chamada HTTP
@@ -332,7 +374,7 @@ do serviço web -- ver `app/core/rate_limit.py`):
 | `POST /auth/register` | 5/hora | 5/hora | Cada cadastro gera um cubo inicial e passa a poder sacar do fundo -- o alvo é travar criação em massa de contas |
 | `POST /auth/login` | 30/min | 20/min | Chamado a cada abertura do app/refresh de token -- limite generoso pra não atrapalhar uso normal, mas trava enumeração agressiva |
 | `POST /ads/watch` | 60/min | 20/min | Assistir um anúncio de verdade leva tempo; 20/min já é folgado pra humano, trava scripts gerando `ad_view`s em volume |
-| `POST /mining/collect` | 30/min | 10/min | Coleta deveria acontecer ~1x por ciclo (2h); limita spam de polling/tentativas de abusar do lock de linha |
+| `POST /mining/collect` | 30/min | 10/min | Coleta deveria acontecer ~1x por ciclo (MINING_SESSION_DURATION_SECONDS, 30min por padrão); limita spam de polling/tentativas de abusar do lock de linha |
 | `POST /pix/withdraw` | 10/hora | 5/hora | Operação financeira, a mais sensível -- um saque legítimo é esporádico, não repetido |
 
 "Por IP" (`get_remote_address`) pega várias contas abusando a partir de um
@@ -425,8 +467,8 @@ valor_por_sessão = clamp(eCPM_médio * ADMOB_REWARD_MARGIN / 1000, R$0,10, R$1,
 - **`GET /reward/current`** (público, sem autenticação): devolve
   `value_per_session`, `avg_ecpm` e `updated_at` vigentes, para o app
   mostrar antes de minerar.
-- **Onde é creditado**: continua em `collect_mining_session` (fim das 2h de
-  mineração), como antes -- só o valor mudou de um sorteio aleatório para o
+- **Onde é creditado**: continua em `collect_mining_session` (fim da sessão
+  de mineração, MINING_SESSION_DURATION_SECONDS), como antes -- só o valor mudou de um sorteio aleatório para o
   valor vigente da `reward_config`. `POST /ads/callback` continua só
   confirmando o `ad_view`, sem nenhum movimento de saldo.
 

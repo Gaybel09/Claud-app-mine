@@ -86,28 +86,23 @@ class Settings(BaseSettings):
     # mudou) e desligue (ou apague a variável) assim que terminar.
     ENABLE_DIAGNOSTIC_ENDPOINTS: bool = False
 
-    # =========================================================================
-    # ATENÇÃO -- SÓ PARA TESTE MANUAL (seção 7). Duração real de uma sessão de
-    # mineração, em segundos. Default 7200 (2h) = o valor de produção de
-    # verdade -- lido do settings a cada chamada de start_mining_session
-    # (não congelado num import), só para permitir encurtar temporariamente
-    # sem precisar editar código.
+    # Duração real de uma sessão de mineração, em segundos (seção 7).
+    # 1800 = 30 minutos -- valor definitivo de produção, não mais um
+    # experimento de teste (era 7200/2h antes). Lido do settings a cada
+    # chamada de start_mining_session (não congelado num import), então
+    # ainda dá pra ajustar aqui (ou por env var, se precisar de novo) sem
+    # precisar tocar em mais nada -- mas o comportamento normal do sistema
+    # já é este, sem depender de nenhuma variável setada manualmente.
     #
-    # Para testar o ciclo completo sem esperar 2h de verdade: setar esta
-    # variável (ex: "120" para 2 minutos) manualmente no dashboard do
-    # Render, SEM alterar o default aqui nem em render.yaml. Existe também
-    # GET /admin/mining/force-ready (app/modules/admin/router.py) para
-    # adiantar uma sessão específica sem mexer em nada global -- prefira
-    # aquele quando só precisar destravar UMA sessão, já que essa variável
-    # afeta TODA sessão nova de TODO usuário enquanto estiver setada.
+    # Efeito direto no fundo de recompensa: sessões mais curtas significam
+    # mais ciclos de reward por usuário na mesma janela de tempo (2h -> 30min
+    # é 4x mais ciclos) -- reveja ADMIN_FUND_LOW_THRESHOLD e o ritmo de
+    # aportes em POST /admin/fund/deposit de acordo.
     #
-    # NUNCA deixe um valor baixo aqui em produção de verdade: encurtar a
-    # duração da sessão multiplica direto a taxa de saque do fundo de
-    # recompensa para qualquer usuário -- FALHA DE SEGURANÇA GRAVE, não só
-    # um bug. Apague a variável (ou volte para 7200) assim que terminar de
-    # testar, antes de qualquer usuário real usar o app.
-    # =========================================================================
-    MINING_SESSION_DURATION_SECONDS: int = 7200
+    # Para destravar UMA sessão específica sem esperar (ex: diagnóstico
+    # pontual), prefira GET /admin/mining/force-ready
+    # (app/modules/admin/router.py) em vez de mexer neste valor.
+    MINING_SESSION_DURATION_SECONDS: int = 1800
 
     # Integração com a AdMob Reporting API (seção 7): valor de recompensa por
     # sessão variável, baseado no eCPM real do bloco premiado -- ver

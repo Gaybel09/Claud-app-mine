@@ -71,8 +71,13 @@ services:
         sync: false
       - key: EFI_CERTIFICATE_PATH
         sync: false
+      # ATENÇÃO: "false" = Efí de PRODUÇÃO de verdade (pix.api.efipay.com.br),
+      # movimenta dinheiro real. Antes de mudar para "false", confirme que
+      # EFI_CLIENT_ID/EFI_CLIENT_SECRET/EFI_CERTIFICATE_PEM no dashboard já
+      # são as credenciais de produção (não as de homologação) -- ver
+      # README ("Migração para produção").
       - key: EFI_SANDBOX
-        value: "true"
+        value: "false"
       - key: EFI_PAYER_PIX_KEY
         sync: false
       # Usada só por GET /admin/register-efi-webhook para montar a URL de
