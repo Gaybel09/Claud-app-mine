@@ -31,7 +31,12 @@ def reconcile_withdrawal(db: Session, withdrawal: Withdrawal) -> None:
     except (EfiApiError, EfiConfigurationError):
         logger.warning("failed to reconcile withdrawal %s", withdrawal.id, exc_info=True)
         return
-    logger.info("Efi get_send_status response for withdrawal %s: %s", withdrawal.id, result)
+    # .info() nunca aparece nos logs -- ver comentário equivalente em
+    # admin_reconcile_withdrawal (app/modules/pix/service.py). Este app não
+    # configura nível de logging em lugar nenhum, então o root logger fica
+    # no default do Python (WARNING) e .info() é descartado antes de
+    # chegar em qualquer handler.
+    logger.warning("Efi get_send_status response for withdrawal %s: %s", withdrawal.id, result)
     efi_status = result.get("status")
     if efi_status:
         apply_efi_status(

@@ -367,7 +367,13 @@ def test_reconcile_withdrawal_leaves_status_unchanged_when_still_processing(clie
     assert response.json()["status"] == "processing"
 
 
-def test_reconcile_withdrawal_is_idempotent_once_paid(client: TestClient, monkeypatch):
+def test_reconcile_withdrawal_always_queries_efi_and_never_double_debits_once_paid(
+    client: TestClient, monkeypatch
+):
+    """Ao contrário do worker periódico, o endpoint admin sempre reconsulta
+    a Efí de verdade quando chamado, mesmo que o saque já esteja pago --
+    a segurança contra debitar duas vezes vem da própria idempotência de
+    apply_efi_status, não de pular a chamada aqui."""
     _register_admin(client, monkeypatch, "uid-admin-reconcile-3", "admin-reconcile-3@example.com")
     user_id = _register_user(client, monkeypatch, "uid-reconcile-3", "reconcile-3@example.com")
     _credit_balance(user_id, Decimal("100.00"))
@@ -380,21 +386,23 @@ def test_reconcile_withdrawal_is_idempotent_once_paid(client: TestClient, monkey
     )
     withdrawal_id = withdraw_response.json()["id"]
 
-    monkeypatch.setattr(
-        pix_service.efi_client, "get_send_status", lambda id_envio: {"status": "REALIZADO"}
-    )
+    call_count = {"n": 0}
+
+    def _get_send_status(id_envio):
+        call_count["n"] += 1
+        return {"status": "REALIZADO"}
+
+    monkeypatch.setattr(pix_service.efi_client, "get_send_status", _get_send_status)
     monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-reconcile-3", "admin-reconcile-3@example.com"))
     first = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
     assert first.json()["status"] == "paid"
 
-    # Segunda chamada não deve consultar a Efí de novo nem debitar duas vezes.
-    def _fail_if_called(id_envio):
-        raise AssertionError("should not query Efi again for an already-terminal withdrawal")
-
-    monkeypatch.setattr(pix_service.efi_client, "get_send_status", _fail_if_called)
     second = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
     assert second.status_code == 200
     assert second.json()["status"] == "paid"
+
+    # A Efí foi consultada nas duas chamadas -- mas o saldo só foi debitado uma vez.
+    assert call_count["n"] == 2
 
     monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-3", "reconcile-3@example.com"))
     balance = client.get("/wallet/balance", headers=_auth_header())
@@ -489,7 +497,12 @@ def test_reconcile_withdrawal_backfills_failure_reason_when_previously_null(clie
     assert second.json()["failure_reason"] == "SALDO_INSUFICIENTE: saldo insuficiente na conta pagadora"
 
 
-def test_reconcile_withdrawal_does_not_requery_once_failure_reason_is_set(client: TestClient, monkeypatch):
+def test_reconcile_withdrawal_still_queries_efi_again_once_failure_reason_is_set(
+    client: TestClient, monkeypatch
+):
+    """Uma segunda chamada explícita do admin ainda consulta a Efí de novo
+    (não é pulada só porque já tem um failure_reason salvo) -- só não muda
+    nada porque o saque já está em estado terminal."""
     _register_admin(client, monkeypatch, "uid-admin-reconcile-7", "admin-reconcile-7@example.com")
     user_id = _register_user(client, monkeypatch, "uid-reconcile-7", "reconcile-7@example.com")
     _credit_balance(user_id, Decimal("100.00"))
@@ -502,24 +515,23 @@ def test_reconcile_withdrawal_does_not_requery_once_failure_reason_is_set(client
     )
     withdrawal_id = withdraw_response.json()["id"]
 
-    monkeypatch.setattr(
-        pix_service.efi_client,
-        "get_send_status",
-        lambda id_envio: {
+    call_count = {"n": 0}
+
+    def _get_send_status(id_envio):
+        call_count["n"] += 1
+        return {
             "status": "NAO_REALIZADO",
             "gnExtras": {"idEnvio": id_envio, "error": {"codigo": "X", "motivo": "y"}},
-        },
-    )
+        }
+
+    monkeypatch.setattr(pix_service.efi_client, "get_send_status", _get_send_status)
     monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-reconcile-7", "admin-reconcile-7@example.com"))
     client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
 
-    def _fail_if_called(id_envio):
-        raise AssertionError("should not query Efi again once failure_reason is already set")
-
-    monkeypatch.setattr(pix_service.efi_client, "get_send_status", _fail_if_called)
     response = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
     assert response.status_code == 200
     assert response.json()["failure_reason"] == "X: y"
+    assert call_count["n"] == 2
 
 
 def test_reconcile_withdrawal_not_found_returns_404(client: TestClient, monkeypatch):

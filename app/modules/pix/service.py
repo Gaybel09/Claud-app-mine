@@ -273,28 +273,35 @@ def admin_reconcile_withdrawal(db: Session, withdrawal_id: int) -> Withdrawal:
     id_envio não encontrado) -- o admin que chamou isso na hora quer saber
     se deu erro, não só um log silencioso.
 
-    Levanta WithdrawalNotFoundError se o id não existir. Idempotente: se o
-    saque já estiver pago, devolve sem consultar a Efí de novo (nunca
-    reconsulta um saque já pago, mesmo que apply_efi_status já seja seguro
-    contra debitar duas vezes -- uma camada extra de cautela). Se já
-    estiver failed mas com failure_reason ainda nulo (reconciliações
-    anteriores a este fix não capturavam o motivo -- ver
-    failure_reason_from_get_status), reconsulta só para preencher o
-    motivo, sem tentar mudar o status de novo."""
+    Levanta WithdrawalNotFoundError se o id não existir. SEMPRE consulta a
+    Efí de verdade, mesmo que o status local já pareça terminal (paid ou
+    failed) -- ao contrário do worker periódico (que só olha withdrawals em
+    "processing", pra não gastar chamada à Efí à toa numa varredura
+    automática de muitos saques), aqui é uma ação explícita e pontual de um
+    admin, então o custo de mais uma chamada é irrelevante perto do valor
+    de conseguir confirmar/completar a informação de um saque específico
+    (ex: um failure_reason que ficou nulo numa reconciliação anterior a
+    este fix). A segurança contra debitar duas vezes um saque já pago não
+    depende de pular a consulta aqui -- fica inteiramente por conta da
+    própria idempotência de apply_efi_status (que sempre confere o estado
+    atual do withdrawal antes de aplicar qualquer mudança real)."""
     withdrawal = db.query(Withdrawal).filter(Withdrawal.id == withdrawal_id).first()
     if withdrawal is None:
         raise WithdrawalNotFoundError()
-    if withdrawal.status == WithdrawalStatus.PAID:
-        return withdrawal
-    if withdrawal.status == WithdrawalStatus.FAILED and withdrawal.failure_reason is not None:
-        return withdrawal
 
     try:
         result = efi_client.get_send_status(withdrawal.efi_id_envio)
     except (EfiApiError, EfiConfigurationError) as exc:
         raise EfiReconcileError(_describe_efi_failure(exc)) from exc
 
-    logger.info("Efi get_send_status response for withdrawal %s: %s", withdrawal.id, result)
+    # .info() nunca aparece nos logs do Render nem em nenhum outro lugar --
+    # este app não configura nível de logging em lugar nenhum (nem
+    # basicConfig nem dictConfig), então o root logger fica no default do
+    # Python (WARNING), e .info() é descartado antes de chegar em qualquer
+    # handler. .warning() é o nível mínimo que garante aparecer sem
+    # depender de configuração adicional -- mesmo padrão já usado em todo
+    # log "importante" deste módulo (ver _describe_efi_failure/create_withdrawal).
+    logger.warning("Efi get_send_status response for withdrawal %s: %s", withdrawal.id, result)
 
     efi_status = result.get("status")
     if efi_status:
