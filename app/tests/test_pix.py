@@ -178,6 +178,41 @@ def test_derive_id_envio_is_deterministic_and_alphanumeric():
     assert efi.derive_id_envio("a-different-key") != first
 
 
+def test_failure_reason_from_get_status_reads_root_level_motivo():
+    """Documentado oficialmente pela Efí (dev.efipay.com.br/en/docs/api-pix/
+    gestao-de-pix/) para a resposta de consulta de status: {"status":
+    "NAO_REALIZADO", "motivo": "..."} -- campo na raiz, não dentro de
+    gnExtras.error (que é a forma usada pelo webhook, não confirmada nesta
+    consulta)."""
+    result = {"status": "NAO_REALIZADO", "motivo": "Negado por timeout"}
+    assert pix_service.failure_reason_from_get_status(result) == "Negado por timeout"
+
+
+def test_failure_reason_from_get_status_falls_back_to_gn_extras_error():
+    result = {
+        "status": "NAO_REALIZADO",
+        "gnExtras": {"idEnvio": "abc123", "error": {"codigo": "X", "motivo": "y"}},
+    }
+    assert pix_service.failure_reason_from_get_status(result) == "X: y"
+
+
+def test_failure_reason_from_get_status_returns_none_for_real_withdrawal_8_response():
+    """Resposta real registrada nos logs (após o fix de logging) para o
+    saque #8 -- NAO_REALIZADO sem "motivo" na raiz nem gnExtras.error, ou
+    seja, a Efí não devolveu o motivo real por esta via para este saque
+    específico. failure_reason continua nulo -- o único jeito de saber o
+    motivo real de #8 é olhando o extrato/dashboard da própria Efí."""
+    result = {
+        "endToEndId": "E09089356202607280925APIe2c80f6f",
+        "idEnvio": "2b0fd66321734d97388de5cac7fc3194",
+        "valor": "0.60",
+        "chave": "b52690c7-edf9-4fe9-9711-e4b527d03efc",
+        "status": "NAO_REALIZADO",
+        "horario": {},
+    }
+    assert pix_service.failure_reason_from_get_status(result) is None
+
+
 def test_webhook_get_verification_check_returns_200(client: TestClient):
     """A Efí checa se a URL do webhook responde antes de aceitar o
     cadastro (PUT /v2/webhook/:chave) -- essa checagem pode usar GET, que

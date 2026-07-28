@@ -35,12 +35,28 @@ def _describe_efi_failure(exc: EfiApiError | EfiConfigurationError) -> str:
 
 def failure_reason_from_get_status(result: dict) -> str | None:
     """Extrai o motivo de falha do corpo cru devolvido por
-    EfiClient.get_send_status -- mesmo campo gnExtras.error usado pelo
-    webhook (ver PixWebhookGnExtrasError em app/schemas/pix.py), só que aqui
-    o corpo não passa pela validação Pydantic do webhook, então lê como
-    dict puro. Sem isso, um saque que a reconciliação (worker periódico ou
-    admin_reconcile_withdrawal) marca como NAO_REALIZADO fica com
-    failure_reason nulo -- só o webhook populava esse campo até aqui."""
+    EfiClient.get_send_status. Duas formas documentadas, checadas nesta
+    ordem:
+
+    1. gnExtras.error.{codigo,motivo} -- mesmo campo usado pelo webhook
+       (ver PixWebhookGnExtrasError em app/schemas/pix.py). Não confirmado
+       que a Efí realmente devolve isso na resposta de consulta de status
+       (só no webhook) -- mantido por precaução, caso apareça.
+    2. "motivo" na raiz da resposta -- documentado oficialmente pela Efí
+       para o endpoint de consulta de status (dev.efipay.com.br/en/docs/
+       api-pix/gestao-de-pix/), ex: {"status": "NAO_REALIZADO", "motivo":
+       "Negado por timeout"}. Esta é a forma real confirmada em produção.
+
+    Mesmo com os dois, a Efí pode devolver NAO_REALIZADO sem nenhum dos
+    dois campos (caso real do saque #8: resposta com endToEndId, idEnvio,
+    valor, chave, status e horario, mas sem "motivo" nem "gnExtras.error")
+    -- nesses casos o motivo real da falha não está disponível por esta
+    via, e a única forma de confirmar é olhando o extrato/dashboard da
+    própria Efí (o admin já foi avisado disso no dashboard do saque)."""
+    root_motivo = result.get("motivo")
+    if root_motivo:
+        return str(root_motivo)[:MAX_FAILURE_REASON_LENGTH]
+
     gn_extras = result.get("gnExtras") or {}
     error = gn_extras.get("error") or {}
     codigo = error.get("codigo")
