@@ -4,6 +4,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.models.fund_adjustment import FundAdjustment
 from app.models.reward_fund import SINGLETON_ID, RewardFund
 from app.models.user import User
 from app.models.withdrawal import Withdrawal
@@ -19,6 +20,10 @@ class UserNotFoundError(AdminError):
 
 
 class InvalidDepositAmountError(AdminError):
+    pass
+
+
+class InvalidAdjustmentError(AdminError):
     pass
 
 
@@ -135,16 +140,65 @@ def deposit_to_fund(db: Session, amount: Decimal) -> dict:
     return get_fund_status(db)
 
 
+def adjust_fund(db: Session, admin_user_id: int, amount: Decimal, reason: str) -> FundAdjustment:
+    """Correção manual no reward_fund (POST /admin/fund/adjust) -- ao
+    contrário de deposit_to_fund, aceita valor negativo, para consertar um
+    depósito digitado errado sem deixar o fundo desalinhado do saldo
+    bancário real. Grava uma linha imutável em fund_adjustments (mesmo
+    espírito de LedgerEntry: só insert, nunca update/delete) para não
+    perder o rastro de quem fez, quando e por quê.
+
+    NÃO mexe em total_in nem total_out -- esses dois continuam refletindo
+    só depósitos/coletas reais (ver deposit_to_fund e
+    mining.collect_mining_session); a correção entra à parte em
+    total_adjustments, mantendo balance == total_in - total_out +
+    total_adjustments sempre reconciliável."""
+    if amount == 0:
+        raise InvalidAdjustmentError("amount must not be zero")
+    reason = reason.strip()
+    if not reason:
+        raise InvalidAdjustmentError("reason must not be empty")
+
+    fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).with_for_update().first()
+    fund.balance += amount
+    fund.total_adjustments += amount
+
+    adjustment = FundAdjustment(
+        amount=amount,
+        reason=reason,
+        balance_after=fund.balance,
+        admin_user_id=admin_user_id,
+    )
+    db.add(adjustment)
+    db.commit()
+    db.refresh(adjustment)
+    return adjustment
+
+
+def list_fund_adjustments(db: Session, page: int, page_size: int) -> tuple[list[FundAdjustment], int]:
+    total = db.query(func.count(FundAdjustment.id)).scalar()
+    items = (
+        db.query(FundAdjustment)
+        .order_by(FundAdjustment.created_at.desc(), FundAdjustment.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total
+
+
 def get_fund_status(db: Session) -> dict:
     fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
     balance = fund.balance if fund is not None else 0
     total_in = fund.total_in if fund is not None else 0
     total_out = fund.total_out if fund is not None else 0
+    total_adjustments = fund.total_adjustments if fund is not None else 0
     threshold = settings.ADMIN_FUND_LOW_THRESHOLD
     return {
         "balance": balance,
         "total_in": total_in,
         "total_out": total_out,
+        "total_adjustments": total_adjustments,
         "low_balance_alert": balance < threshold,
         "low_balance_threshold": threshold,
     }

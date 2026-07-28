@@ -12,6 +12,7 @@ from app.db.base import Base
 from app.models import (  # noqa: F401
     ad_view,
     cube,
+    fund_adjustment,
     ledger_entry,
     mining_session,
     reward_config,

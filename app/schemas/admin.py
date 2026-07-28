@@ -47,6 +47,7 @@ class AdminFundRead(BaseModel):
     balance: Decimal
     total_in: Decimal
     total_out: Decimal
+    total_adjustments: Decimal
     low_balance_alert: bool
     low_balance_threshold: Decimal
 
@@ -56,6 +57,32 @@ class AdminFundDepositRequest(BaseModel):
     # dinheiro de verdade que entrou na conta (ex: um aporte via Pix na
     # conta Efí), então não é algo pra aceitar um valor negativo/zero aqui.
     amount: Decimal
+
+
+class AdminFundAdjustRequest(BaseModel):
+    # Positivo ou negativo, nunca zero (validado em service.adjust_fund) --
+    # para corrigir um depósito digitado errado sem representar isso como
+    # um aporte real (deposit_to_fund) nem uma coleta de recompensa real.
+    amount: Decimal
+    reason: str
+
+
+class AdminFundAdjustmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    amount: Decimal
+    reason: str
+    balance_after: Decimal
+    admin_user_id: int
+    created_at: datetime
+
+
+class AdminFundAdjustmentListRead(BaseModel):
+    items: list[AdminFundAdjustmentRead]
+    page: int
+    page_size: int
+    total: int
 
 
 class AdminSharedDeviceUserRead(BaseModel):

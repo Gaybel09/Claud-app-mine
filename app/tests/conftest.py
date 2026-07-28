@@ -14,9 +14,13 @@ def _clean_tables():
         connection.execute(text("TRUNCATE TABLE users RESTART IDENTITY CASCADE"))
         # reward_fund/reward_config have no FK to users, so the cascade
         # above doesn't touch them -- reset both singleton rows back to
-        # their seeded state.
+        # their seeded state. fund_adjustments DOES have an FK to users
+        # (admin_user_id), so the cascade above already clears it.
         connection.execute(
-            text("UPDATE reward_fund SET balance = 0, total_in = 0, total_out = 0, updated_at = now() WHERE id = 1")
+            text(
+                "UPDATE reward_fund SET balance = 0, total_in = 0, total_out = 0, "
+                "total_adjustments = 0, updated_at = now() WHERE id = 1"
+            )
         )
         connection.execute(
             text(

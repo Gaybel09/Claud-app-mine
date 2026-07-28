@@ -485,6 +485,189 @@ def test_deposit_to_fund_unlocks_the_full_collect_flow(client: TestClient, monke
     assert successful_collect.json()["status"] == "collected"
 
 
+# --- POST /admin/fund/adjust --------------------------------------------------
+
+
+def test_adjust_fund_with_positive_amount_increases_balance(client: TestClient, monkeypatch):
+    admin_id = _register_admin(client, monkeypatch, "uid-admin-adjust-1", "admin-adjust-1@example.com")
+
+    response = client.post(
+        "/admin/fund/adjust",
+        json={"amount": "25.00", "reason": "aporte esquecido de registrar"},
+        headers=_auth_header(),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert Decimal(body["amount"]) == Decimal("25.00")
+    assert body["reason"] == "aporte esquecido de registrar"
+    assert Decimal(body["balance_after"]) == Decimal("25.00")
+    assert body["admin_user_id"] == admin_id
+
+    db = SessionLocal()
+    try:
+        fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
+        assert fund.balance == Decimal("25.00")
+        assert fund.total_adjustments == Decimal("25.00")
+    finally:
+        db.close()
+
+
+def test_adjust_fund_with_negative_amount_decreases_balance(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-adjust-2", "admin-adjust-2@example.com")
+
+    db = SessionLocal()
+    try:
+        fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
+        fund.balance = Decimal("100.00")
+        fund.total_in = Decimal("100.00")
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        "/admin/fund/adjust",
+        json={"amount": "-15.00", "reason": "depósito digitado errado (100 em vez de 85)"},
+        headers=_auth_header(),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert Decimal(body["amount"]) == Decimal("-15.00")
+    assert Decimal(body["balance_after"]) == Decimal("85.00")
+
+    db = SessionLocal()
+    try:
+        fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
+        assert fund.balance == Decimal("85.00")
+        assert fund.total_adjustments == Decimal("-15.00")
+        # total_in não deve ser tocado por um ajuste -- continua refletindo
+        # só o depósito real que já tinha acontecido.
+        assert fund.total_in == Decimal("100.00")
+    finally:
+        db.close()
+
+
+def test_adjust_fund_rejects_zero_amount(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-adjust-3", "admin-adjust-3@example.com")
+
+    response = client.post(
+        "/admin/fund/adjust", json={"amount": "0", "reason": "sem motivo real"}, headers=_auth_header()
+    )
+    assert response.status_code == 400
+
+
+def test_adjust_fund_rejects_blank_reason(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-adjust-4", "admin-adjust-4@example.com")
+
+    blank_response = client.post(
+        "/admin/fund/adjust", json={"amount": "10.00", "reason": ""}, headers=_auth_header()
+    )
+    assert blank_response.status_code == 400
+
+    whitespace_response = client.post(
+        "/admin/fund/adjust", json={"amount": "10.00", "reason": "   "}, headers=_auth_header()
+    )
+    assert whitespace_response.status_code == 400
+
+    db = SessionLocal()
+    try:
+        fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
+        assert fund.balance == Decimal("0")
+    finally:
+        db.close()
+
+
+def test_adjust_fund_does_not_touch_total_in_or_total_out(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-adjust-5", "admin-adjust-5@example.com")
+
+    db = SessionLocal()
+    try:
+        fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
+        fund.balance = Decimal("50.00")
+        fund.total_in = Decimal("70.00")
+        fund.total_out = Decimal("20.00")
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        "/admin/fund/adjust", json={"amount": "5.00", "reason": "correção pontual"}, headers=_auth_header()
+    )
+    assert response.status_code == 200
+
+    db = SessionLocal()
+    try:
+        fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).first()
+        assert fund.balance == Decimal("55.00")
+        assert fund.total_in == Decimal("70.00")
+        assert fund.total_out == Decimal("20.00")
+        assert fund.total_adjustments == Decimal("5.00")
+    finally:
+        db.close()
+
+
+def test_adjust_fund_requires_admin_login(client: TestClient, monkeypatch):
+    _register_user(client, monkeypatch, "uid-not-admin-adjust", "not-admin-adjust@example.com")
+
+    response = client.post(
+        "/admin/fund/adjust", json={"amount": "10.00", "reason": "teste"}, headers=_auth_header()
+    )
+    assert response.status_code == 403
+
+
+def test_fund_status_reports_total_adjustments(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-adjust-6", "admin-adjust-6@example.com")
+
+    client.post(
+        "/admin/fund/adjust", json={"amount": "-3.50", "reason": "correção"}, headers=_auth_header()
+    )
+    response = client.get("/admin/fund", headers=_auth_header())
+    assert Decimal(response.json()["total_adjustments"]) == Decimal("-3.50")
+
+
+# --- GET /admin/fund/adjustments -----------------------------------------------
+
+
+def test_list_fund_adjustments_orders_most_recent_first(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-adjust-list-1", "admin-adjust-list-1@example.com")
+
+    client.post(
+        "/admin/fund/adjust", json={"amount": "10.00", "reason": "primeiro ajuste"}, headers=_auth_header()
+    )
+    client.post(
+        "/admin/fund/adjust", json={"amount": "-4.00", "reason": "segundo ajuste"}, headers=_auth_header()
+    )
+
+    response = client.get("/admin/fund/adjustments", headers=_auth_header())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    assert [item["reason"] for item in body["items"]] == ["segundo ajuste", "primeiro ajuste"]
+
+
+def test_list_fund_adjustments_paginates(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-adjust-list-2", "admin-adjust-list-2@example.com")
+
+    for i in range(3):
+        client.post(
+            "/admin/fund/adjust", json={"amount": "1.00", "reason": f"ajuste {i}"}, headers=_auth_header()
+        )
+
+    response = client.get("/admin/fund/adjustments?page=1&page_size=2", headers=_auth_header())
+    body = response.json()
+    assert body["total"] == 3
+    assert len(body["items"]) == 2
+
+    second_page = client.get("/admin/fund/adjustments?page=2&page_size=2", headers=_auth_header())
+    assert len(second_page.json()["items"]) == 1
+
+
+def test_list_fund_adjustments_requires_admin_login(client: TestClient, monkeypatch):
+    _register_user(client, monkeypatch, "uid-not-admin-adjust-list", "not-admin-adjust-list@example.com")
+
+    response = client.get("/admin/fund/adjustments", headers=_auth_header())
+    assert response.status_code == 403
+
+
 # --- GET /admin/users/{id}/devices -------------------------------------------
 
 

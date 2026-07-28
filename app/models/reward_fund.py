@@ -20,6 +20,14 @@ class RewardFund(Base):
     balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
     total_in: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
     total_out: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    # Soma de todos os ajustes manuais (POST /admin/fund/adjust, ver
+    # app/models/fund_adjustment.py) -- positivo ou negativo, nunca tocado
+    # por depósitos (total_in) nem coletas de recompensa (total_out) de
+    # verdade. Mantém o invariante balance == total_in - total_out +
+    # total_adjustments sempre reconciliável, mesmo depois de correções.
+    total_adjustments: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0, server_default="0"
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

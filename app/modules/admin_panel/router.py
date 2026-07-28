@@ -3,10 +3,14 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_current_admin_user
 from app.db.session import get_db
+from app.models.user import User
 from app.models.withdrawal import WithdrawalStatus
 from app.modules.admin_panel import service
 from app.modules.pix import service as pix_service
 from app.schemas.admin import (
+    AdminFundAdjustmentListRead,
+    AdminFundAdjustmentRead,
+    AdminFundAdjustRequest,
     AdminFundDepositRequest,
     AdminFundRead,
     AdminUserDevicesRead,
@@ -112,3 +116,30 @@ def deposit_to_fund(payload: AdminFundDepositRequest, db: Session = Depends(get_
         return service.deposit_to_fund(db, payload.amount)
     except service.InvalidDepositAmountError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "amount must be positive")
+
+
+@router.post("/fund/adjust", response_model=AdminFundAdjustmentRead)
+def adjust_fund(
+    payload: AdminFundAdjustRequest,
+    db: Session = Depends(get_db),
+    current_admin_user: User = Depends(get_current_admin_user),
+):
+    """Correção manual no reward_fund (ex: consertar um depósito digitado
+    errado em POST /admin/fund/deposit) -- ver docstring de
+    service.adjust_fund. Ao contrário do deposit, aceita valor negativo, e
+    exige um motivo não vazio para manter o rastro de auditoria em
+    fund_adjustments (GET /admin/fund/adjustments)."""
+    try:
+        return service.adjust_fund(db, current_admin_user.id, payload.amount, payload.reason)
+    except service.InvalidAdjustmentError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
+@router.get("/fund/adjustments", response_model=AdminFundAdjustmentListRead)
+def list_fund_adjustments(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    items, total = service.list_fund_adjustments(db, page=page, page_size=page_size)
+    return AdminFundAdjustmentListRead(items=items, page=page, page_size=page_size, total=total)
