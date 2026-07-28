@@ -315,6 +315,128 @@ def test_approve_already_failed_withdrawal_returns_400(client: TestClient, monke
     assert response.status_code == 400
 
 
+# --- POST /admin/withdrawals/{id}/reconcile ----------------------------------
+
+
+def test_reconcile_withdrawal_applies_paid_status_from_efi(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-reconcile-1", "admin-reconcile-1@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-reconcile-1", "reconcile-1@example.com")
+    _credit_balance(user_id, Decimal("100.00"))
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-1", "reconcile-1@example.com"))
+    withdraw_response = client.post(
+        "/pix/withdraw",
+        json={"amount": "30.00"},
+        headers={**_auth_header(), "Idempotency-Key": "admin-reconcile-1"},
+    )
+    withdrawal_id = withdraw_response.json()["id"]
+    assert withdraw_response.json()["status"] == "processing"
+
+    monkeypatch.setattr(
+        pix_service.efi_client, "get_send_status", lambda id_envio: {"status": "REALIZADO"}
+    )
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-reconcile-1", "admin-reconcile-1@example.com"))
+    reconcile_response = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+    assert reconcile_response.status_code == 200
+    assert reconcile_response.json()["status"] == "paid"
+
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-1", "reconcile-1@example.com"))
+    balance = client.get("/wallet/balance", headers=_auth_header())
+    assert Decimal(str(balance.json()["balance"])) == Decimal("70.00")
+
+
+def test_reconcile_withdrawal_leaves_status_unchanged_when_still_processing(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-reconcile-2", "admin-reconcile-2@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-reconcile-2", "reconcile-2@example.com")
+    _credit_balance(user_id, Decimal("100.00"))
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-2", "reconcile-2@example.com"))
+    withdraw_response = client.post(
+        "/pix/withdraw",
+        json={"amount": "10.00"},
+        headers={**_auth_header(), "Idempotency-Key": "admin-reconcile-2"},
+    )
+    withdrawal_id = withdraw_response.json()["id"]
+
+    monkeypatch.setattr(
+        pix_service.efi_client, "get_send_status", lambda id_envio: {"status": "EM_PROCESSAMENTO"}
+    )
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-reconcile-2", "admin-reconcile-2@example.com"))
+    response = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+    assert response.status_code == 200
+    assert response.json()["status"] == "processing"
+
+
+def test_reconcile_withdrawal_is_idempotent_once_paid(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-reconcile-3", "admin-reconcile-3@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-reconcile-3", "reconcile-3@example.com")
+    _credit_balance(user_id, Decimal("100.00"))
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-3", "reconcile-3@example.com"))
+    withdraw_response = client.post(
+        "/pix/withdraw",
+        json={"amount": "20.00"},
+        headers={**_auth_header(), "Idempotency-Key": "admin-reconcile-3"},
+    )
+    withdrawal_id = withdraw_response.json()["id"]
+
+    monkeypatch.setattr(
+        pix_service.efi_client, "get_send_status", lambda id_envio: {"status": "REALIZADO"}
+    )
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-reconcile-3", "admin-reconcile-3@example.com"))
+    first = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+    assert first.json()["status"] == "paid"
+
+    # Segunda chamada não deve consultar a Efí de novo nem debitar duas vezes.
+    def _fail_if_called(id_envio):
+        raise AssertionError("should not query Efi again for an already-terminal withdrawal")
+
+    monkeypatch.setattr(pix_service.efi_client, "get_send_status", _fail_if_called)
+    second = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+    assert second.status_code == 200
+    assert second.json()["status"] == "paid"
+
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-3", "reconcile-3@example.com"))
+    balance = client.get("/wallet/balance", headers=_auth_header())
+    assert Decimal(str(balance.json()["balance"])) == Decimal("80.00")
+
+
+def test_reconcile_withdrawal_returns_503_when_efi_query_fails(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-reconcile-4", "admin-reconcile-4@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-reconcile-4", "reconcile-4@example.com")
+    _credit_balance(user_id, Decimal("100.00"))
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-reconcile-4", "reconcile-4@example.com"))
+    withdraw_response = client.post(
+        "/pix/withdraw",
+        json={"amount": "10.00"},
+        headers={**_auth_header(), "Idempotency-Key": "admin-reconcile-4"},
+    )
+    withdrawal_id = withdraw_response.json()["id"]
+
+    def _raise(id_envio):
+        raise EfiApiError(500, "efi is down")
+
+    monkeypatch.setattr(pix_service.efi_client, "get_send_status", _raise)
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-admin-reconcile-4", "admin-reconcile-4@example.com"))
+    response = client.post(f"/admin/withdrawals/{withdrawal_id}/reconcile", headers=_auth_header())
+    assert response.status_code == 503
+
+
+def test_reconcile_withdrawal_not_found_returns_404(client: TestClient, monkeypatch):
+    _register_admin(client, monkeypatch, "uid-admin-reconcile-404", "admin-reconcile-404@example.com")
+
+    response = client.post("/admin/withdrawals/999999/reconcile", headers=_auth_header())
+    assert response.status_code == 404
+
+
+def test_reconcile_withdrawal_requires_admin_login(client: TestClient, monkeypatch):
+    _register_user(client, monkeypatch, "uid-not-admin-reconcile", "not-admin-reconcile@example.com")
+
+    response = client.post("/admin/withdrawals/1/reconcile", headers=_auth_header())
+    assert response.status_code == 403
+
+
 # --- GET /admin/fund ----------------------------------------------------------
 
 

@@ -100,6 +100,23 @@ def approve_withdrawal(withdrawal_id: int, db: Session = Depends(get_db)):
     return withdrawal
 
 
+@router.post("/withdrawals/{withdrawal_id}/reconcile", response_model=AdminWithdrawalRead)
+def reconcile_withdrawal(withdrawal_id: int, db: Session = Depends(get_db)):
+    """Consulta o status real de um saque específico direto na Efí e aplica
+    -- ver docstring de pix.service.admin_reconcile_withdrawal. Útil para
+    saques presos em "processing" sem esperar o worker periódico (que hoje
+    não roda como processo em produção, ver render.yaml) nem depender só
+    do webhook. Não inventa nada: só reflete o que a Efí realmente reportar
+    para esse saque."""
+    try:
+        withdrawal = pix_service.admin_reconcile_withdrawal(db, withdrawal_id)
+    except pix_service.WithdrawalNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "withdrawal not found")
+    except pix_service.EfiReconcileError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"failed to query Efi: {exc}")
+    return withdrawal
+
+
 @router.get("/fund", response_model=AdminFundRead)
 def fund_status(db: Session = Depends(get_db)):
     return service.get_fund_status(db)

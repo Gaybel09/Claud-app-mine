@@ -53,6 +53,14 @@ class WithdrawalNotApprovableError(PixError):
     pass
 
 
+class EfiReconcileError(PixError):
+    """A consulta de status na Efí falhou (credencial não configurada, Efí
+    fora do ar, id_envio desconhecido, etc) -- ao contrário do worker
+    periódico (que só loga e segue pro próximo saque), aqui o chamador é um
+    admin esperando uma resposta na hora, então o erro é propagado em vez
+    de engolido."""
+
+
 def _mark_paid(db: Session, withdrawal: Withdrawal) -> None:
     create_ledger_entry(
         db,
@@ -222,5 +230,40 @@ def admin_approve_withdrawal(db: Session, withdrawal_id: int) -> Withdrawal:
 
     _mark_paid(db, withdrawal)
     db.commit()
+    db.refresh(withdrawal)
+    return withdrawal
+
+
+def admin_reconcile_withdrawal(db: Session, withdrawal_id: int) -> Withdrawal:
+    """Consulta o status real de um saque específico direto na Efí e aplica
+    (mesma lógica de app.workers.tasks.reconcile_withdrawal, usada pelo
+    worker periódico de reconciliação) -- via de escape sob demanda para um
+    admin verificar um saque preso em "processing" sem esperar o Celery Beat
+    rodar (que hoje nem está implantado como processo em produção, ver
+    render.yaml) nem depender só do webhook.
+
+    Ao contrário do worker periódico, propaga EfiReconcileError se a
+    consulta à Efí falhar (credencial não configurada, Efí fora do ar,
+    id_envio não encontrado) -- o admin que chamou isso na hora quer saber
+    se deu erro, não só um log silencioso.
+
+    Levanta WithdrawalNotFoundError se o id não existir. Idempotente: se o
+    saque já estiver em estado terminal (paid/failed), devolve sem
+    consultar a Efí de novo."""
+    withdrawal = db.query(Withdrawal).filter(Withdrawal.id == withdrawal_id).first()
+    if withdrawal is None:
+        raise WithdrawalNotFoundError()
+    if withdrawal.status in (WithdrawalStatus.PAID, WithdrawalStatus.FAILED):
+        return withdrawal
+
+    try:
+        result = efi_client.get_send_status(withdrawal.efi_id_envio)
+    except (EfiApiError, EfiConfigurationError) as exc:
+        raise EfiReconcileError(_describe_efi_failure(exc)) from exc
+
+    efi_status = result.get("status")
+    if efi_status:
+        apply_efi_status(db, id_envio=withdrawal.efi_id_envio, efi_status=efi_status)
+
     db.refresh(withdrawal)
     return withdrawal
