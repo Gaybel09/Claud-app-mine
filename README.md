@@ -99,6 +99,14 @@ de uma estiver setada, a prioridade é `EFI_CERTIFICATE_PEM` >
 Configure também o webhook de envio de Pix no painel da Efí apontando para
 `https://SEU_HOST/pix/webhook`.
 
+**Atenção**: a Efí acrescenta automaticamente o sufixo `/pix` a QUALQUER URL
+registrada em `PUT /v2/webhook/:chave` (não é opcional -- ver
+[dev.efipay.com.br/en/docs/api-pix/gestao-de-pix/](https://dev.efipay.com.br/en/docs/api-pix/gestao-de-pix/)).
+Ou seja, a notificação de verdade chega em `/pix/webhook/pix`, não em
+`/pix/webhook` -- por isso `POST /pix/webhook/pix` existe como alias da
+mesma rota (`app/modules/pix/router.py`). Não registre a URL já com esse
+sufixo (`.../pix/webhook/pix`): a Efí acrescentaria outro `/pix` por cima.
+
 A Efí exige que `idEnvio` (o identificador do envio, na URL de `PUT
 /v3/gn/pix/:idEnvio`) case com `^[a-zA-Z0-9]{1,35}$` -- só alfanumérico, sem
 hífen. Como `Idempotency-Key` é escolhida por quem chama `POST

@@ -83,9 +83,23 @@ def webhook_ping():
 
 
 @router.post("/webhook")
+@router.post("/webhook/pix")
 async def webhook(request: Request, db: Session = Depends(get_db)):
     # Webhook da Efí (servidor-a-servidor), não do app -- por isso não exige
     # o Bearer do usuário, igual ao /ads/callback.
+    #
+    # Rota dupla (/pix/webhook e /pix/webhook/pix): a Efí acrescenta
+    # automaticamente o sufixo "/pix" a QUALQUER URL registrada em
+    # PUT /v2/webhook/:chave (não é opcional, não dá pra desligar) -- ver
+    # docs oficiais (dev.efipay.com.br/en/docs/api-pix/gestao-de-pix/) e o
+    # 404 real observado nos logs do Render: "POST /pix/webhook/pix" (a
+    # URL que registramos, "PUBLIC_BASE_URL + /pix/webhook", virou
+    # ".../pix/webhook" + "/pix" na entrega de verdade). Sem esta segunda
+    # rota, TODA notificação de confirmação de saque (envio de Pix) batia
+    # 404 desde a migração pra produção -- ou seja, nem webhook nem (até a
+    # correção anterior) o worker periódico de reconciliação nunca
+    # confirmaram um saque automaticamente; só GET /pix/health e o
+    # /admin/withdrawals/{id}/reconcile sob demanda funcionavam.
     #
     # Antes de aceitar o cadastro de um webhook, a Efí manda uma requisição
     # de teste pra essa URL pra checar se ela responde -- e não

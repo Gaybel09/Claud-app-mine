@@ -281,6 +281,38 @@ def test_webhook_confirms_and_debits_balance(client: TestClient, monkeypatch):
     assert withdrawals_response.json()[0]["status"] == "paid"
 
 
+def test_webhook_pix_suffix_alias_confirms_and_debits_balance(client: TestClient, monkeypatch):
+    """A Efí acrescenta automaticamente o sufixo "/pix" a QUALQUER URL
+    registrada em PUT /v2/webhook/:chave (não é opcional) -- registramos
+    PUBLIC_BASE_URL + "/pix/webhook", então a notificação de verdade chega
+    em "/pix/webhook/pix", não em "/pix/webhook" (confirmado por um 404
+    real nos logs do Render antes desta rota existir). Esta rota alias
+    precisa se comportar de forma idêntica à rota original."""
+    user_id = _register_user(client, monkeypatch, "uid-pix-webhook-pix-alias", "pix-webhook-pix-alias@example.com")
+    _credit_balance(user_id, Decimal("100.00"))
+
+    monkeypatch.setattr(pix_service.efi_client, "send_pix", lambda **kwargs: {"status": "EM_PROCESSAMENTO"})
+
+    withdraw_response = client.post(
+        "/pix/withdraw",
+        json={"amount": "40.00"},
+        headers={**_auth_header(), "Idempotency-Key": "withdraw-webhook-pix-alias-1"},
+    )
+    assert withdraw_response.status_code == 201
+
+    webhook_response = client.post(
+        "/pix/webhook/pix",
+        json={
+            "status": "REALIZADO",
+            "gnExtras": {"idEnvio": _efi_id_envio_for("withdraw-webhook-pix-alias-1")},
+        },
+    )
+    assert webhook_response.status_code == 200
+
+    balance_after = client.get("/wallet/balance", headers=_auth_header())
+    assert Decimal(str(balance_after.json()["balance"])) == Decimal("60.00")
+
+
 def test_duplicate_webhook_does_not_debit_twice(client: TestClient, monkeypatch):
     user_id = _register_user(client, monkeypatch, "uid-pix-dup-webhook", "pix-dup-webhook@example.com")
     _credit_balance(user_id, Decimal("100.00"))

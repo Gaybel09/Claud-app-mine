@@ -2,6 +2,15 @@
 apontando para PUBLIC_BASE_URL + "/pix/webhook" (PUT /v2/webhook/:chave) --
 diagnóstico manual, seção 11.
 
+ATENÇÃO -- a Efí acrescenta automaticamente o sufixo "/pix" a QUALQUER URL
+registrada aqui (não é opcional, não dá pra desligar -- ver
+dev.efipay.com.br/en/docs/api-pix/gestao-de-pix/). Ou seja, a notificação
+de verdade chega em PUBLIC_BASE_URL + "/pix/webhook/pix", não em
+"/pix/webhook" -- confirmado por um 404 real nos logs do Render antes de
+app/modules/pix/router.py ganhar a rota alias POST /pix/webhook/pix. Não
+mude webhook_url aqui para "compensar" esse sufixo -- ele é sempre
+acrescentado por cima do que for registrado.
+
 ATENÇÃO -- isto é só para diagnóstico manual, nunca para produção de
 verdade (fora de sandbox):
   - Faz uma chamada real de escrita na conta Efí: registra (ou sobrescreve)
