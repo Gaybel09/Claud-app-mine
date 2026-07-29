@@ -1,3 +1,4 @@
+import 'package:cubemine_pix/core/api_exception.dart';
 import 'package:cubemine_pix/models/cube.dart';
 import 'package:cubemine_pix/models/mining_session.dart';
 import 'package:cubemine_pix/screens/cube/cube_screen.dart';
@@ -37,6 +38,8 @@ void main() {
         startedAt: startedAt,
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 1;
       miningApi.collectResult = const MiningCollectResult(
@@ -165,6 +168,8 @@ void main() {
         startedAt: startedAt,
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 999;
 
@@ -232,6 +237,144 @@ void main() {
       expect(miningApi.startCallCount, 0);
       expect(find.byKey(const Key('cube_error_text')), findsOneWidget);
       expect(find.text('Assista o anúncio até o fim para começar a minerar.'), findsOneWidget);
+    });
+
+    Future<FakeMiningApi> pumpRunningMiningScreen(
+      WidgetTester tester, {
+      bool epicBonusApplied = false,
+      bool speedupUsed = false,
+    }) async {
+      final cubesApi = FakeCubesApi()
+        ..cubes = [
+          Cube(
+            id: 1,
+            userId: 1,
+            type: 'comum',
+            speed: 1.0,
+            bonusChance: 0.05,
+            acquiredAt: DateTime.now(),
+          ),
+        ];
+      final adsApi = FakeAdsApi();
+      final miningApi = FakeMiningApi();
+      final startedAt = DateTime.now();
+      miningApi.activeSessionToReturn = MiningSession(
+        id: 88,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 3,
+        startedAt: startedAt,
+        endsAt: startedAt.add(const Duration(hours: 2)),
+        status: 'running',
+        epicBonusApplied: epicBonusApplied,
+        speedupUsed: speedupUsed,
+      );
+      miningApi.statusNotReadyCount = 999;
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            Provider<CubesApi>.value(value: cubesApi),
+            Provider<AdsApi>.value(value: adsApi),
+            Provider<MiningApi>.value(value: miningApi),
+            Provider<RewardedAdService>.value(value: FakeRewardedAdService()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.dark,
+            home: const CubeScreen(
+              adConfirmationPollInterval: Duration(milliseconds: 10),
+              miningStatusPollInterval: Duration(milliseconds: 10),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return miningApi;
+    }
+
+    testWidgets('shows both bonus buttons while mining and neither has been used', (tester) async {
+      await pumpRunningMiningScreen(tester);
+
+      expect(find.byKey(const Key('epic_bonus_button')), findsOneWidget);
+      expect(find.byKey(const Key('speedup_button')), findsOneWidget);
+    });
+
+    testWidgets('hides a bonus button that was already used when the session is restored', (tester) async {
+      await pumpRunningMiningScreen(tester, epicBonusApplied: true, speedupUsed: true);
+
+      expect(find.byKey(const Key('epic_bonus_button')), findsNothing);
+      expect(find.byKey(const Key('speedup_button')), findsNothing);
+    });
+
+    testWidgets('tapping the epic bonus button watches an ad and hides the button once applied', (tester) async {
+      final miningApi = await pumpRunningMiningScreen(tester);
+      miningApi.epicBonusResult = MiningSession(
+        id: 88,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 3,
+        startedAt: miningApi.activeSessionToReturn!.startedAt,
+        endsAt: miningApi.activeSessionToReturn!.endsAt,
+        status: 'running',
+        epicBonusApplied: true,
+        speedupUsed: false,
+      );
+
+      await tester.tap(find.byKey(const Key('epic_bonus_button')));
+      await tester.pump();
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(miningApi.epicBonusCallCount, 1);
+      expect(find.byKey(const Key('epic_bonus_button')), findsNothing);
+      // O botão de acelerar continua disponível -- são bônus independentes.
+      expect(find.byKey(const Key('speedup_button')), findsOneWidget);
+    });
+
+    testWidgets('tapping the speedup button watches an ad and hides the button once used', (tester) async {
+      final miningApi = await pumpRunningMiningScreen(tester);
+      miningApi.speedupResult = MiningSession(
+        id: 88,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 3,
+        startedAt: miningApi.activeSessionToReturn!.startedAt,
+        endsAt: DateTime.now().add(const Duration(minutes: 30)),
+        status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: true,
+      );
+
+      await tester.tap(find.byKey(const Key('speedup_button')));
+      await tester.pump();
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(miningApi.speedupCallCount, 1);
+      expect(find.byKey(const Key('speedup_button')), findsNothing);
+      expect(find.byKey(const Key('epic_bonus_button')), findsOneWidget);
+    });
+
+    testWidgets('shows a friendly error under the epic bonus button without leaving the mining stage', (tester) async {
+      final miningApi = await pumpRunningMiningScreen(tester);
+      miningApi.throwOnEpicBonus = const ApiException(
+        statusCode: 409,
+        message: 'epic bonus already used for this session',
+      );
+
+      await tester.tap(find.byKey(const Key('epic_bonus_button')));
+      await tester.pump();
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(find.textContaining('epic bonus already used'), findsOneWidget);
+      // A mineração em si segue rodando -- o botão continua visível pra
+      // tentar de novo, a tela não vira o estado de erro genérico.
+      expect(find.byKey(const Key('epic_bonus_button')), findsOneWidget);
+      expect(find.byKey(const Key('cube_error_text')), findsNothing);
     });
   });
 }

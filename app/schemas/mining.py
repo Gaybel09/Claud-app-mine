@@ -19,6 +19,8 @@ class MiningSessionRead(BaseModel):
     started_at: datetime
     ends_at: datetime
     status: str
+    epic_bonus_applied: bool
+    speedup_used: bool
 
 
 class MiningStatusRead(BaseModel):
@@ -38,3 +40,13 @@ class MiningCollectResponse(BaseModel):
     session_id: int
     status: str
     reward_amount: Decimal
+
+
+class MiningEpicBonusRequest(BaseModel):
+    session_id: int
+    ad_view_id: int
+
+
+class MiningSpeedupRequest(BaseModel):
+    session_id: int
+    ad_view_id: int

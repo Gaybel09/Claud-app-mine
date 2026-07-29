@@ -1,11 +1,13 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.models.ad_view import AdView
 from app.models.cube import Cube
 from app.models.ledger_entry import LedgerEntry, LedgerEntryType
 from app.models.mining_session import MiningSession, MiningSessionStatus
@@ -18,6 +20,21 @@ logger = logging.getLogger(__name__)
 
 # Seção 8: "soma_esperada_de_payouts <= fundo.balance * margem_de_segurança".
 REWARD_FUND_SAFETY_MARGIN = Decimal("0.9")
+
+# Cubo Épico (anúncio bônus): +25% sobre o value_per_session vigente para a
+# sessão que usar o bônus -- não "75% do eCPM combinado dos dois anúncios"
+# (isso daria 3x, não 1.25x; eCPM real não é rastreado por anúncio
+# individual, só a média diária que já alimenta value_per_session, então
+# "combinar o eCPM dos dois anúncios" nem seria possível de calcular de
+# verdade). Decisão explícita do produto: prioriza não acelerar o consumo
+# do reward_fund em vez de maximizar a fatia repassada ao usuário nessa
+# sessão.
+EPIC_BONUS_MULTIPLIER = Decimal("1.25")
+
+# Acelerar (2x): reduz o tempo restante pela metade -- não "acelera o
+# clock" de verdade, só reagenda ends_at pra now() + metade do que faltava.
+# float, não Decimal -- timedelta só aceita multiplicar por int/float.
+SPEEDUP_FACTOR = 0.5
 
 
 def _mining_session_duration() -> timedelta:
@@ -63,6 +80,23 @@ class SessionNotReadyError(MiningError):
 
 class InsufficientRewardFundError(MiningError):
     pass
+
+
+class EpicBonusAlreadyUsedError(MiningError):
+    """Cubo Épico já foi usado nesta sessão -- ver apply_epic_bonus.
+    Idempotência por estado (epic_bonus_applied), não por Idempotency-Key:
+    uma segunda tentativa (retry de rede, duplo clique) sempre bate nesta
+    checagem, nunca aplica o bônus duas vezes."""
+
+
+class SpeedupAlreadyUsedError(MiningError):
+    """Acelerar já foi usado nesta sessão -- ver apply_speedup. Mesma
+    idempotência por estado (speedup_used) de EpicBonusAlreadyUsedError."""
+
+
+class NothingToSpeedUpError(MiningError):
+    """A sessão já chegou em ends_at (pronta pra coletar ou já coletada/
+    expirada) -- não há mais tempo restante pra reduzir pela metade."""
 
 
 @dataclass
@@ -123,6 +157,109 @@ def start_mining_session(db: Session, user_id: int, cube_id: int, ad_view_id: in
 
     _schedule_ready_notification(session)
 
+    return session
+
+
+def _consume_bonus_ad_view(db: Session, user_id: int, ad_view_id: int) -> None:
+    """Validação compartilhada por apply_epic_bonus/apply_speedup: o
+    ad_view precisa (1) existir e pertencer a quem está chamando, (2) estar
+    confirmado (mesmo callback assíncrono do SDK usado por
+    start_mining_session -- nunca só o aviso do cliente), e (3) nunca ter
+    sido consumido antes, nem pra iniciar uma sessão (MiningSession.ad_view_id)
+    nem pro outro bônus (epic_bonus_ad_view_id/speedup_ad_view_id) -- sem
+    isso, um único anúncio assistido poderia "pagar" duas vezes."""
+    if not is_ad_confirmed(db, ad_view_id):
+        raise AdViewNotConfirmedError()
+
+    ad_view = db.query(AdView).filter(AdView.id == ad_view_id).first()
+    if ad_view is None or ad_view.user_id != user_id:
+        raise AdViewNotConfirmedError()
+
+    already_used = (
+        db.query(MiningSession)
+        .filter(
+            or_(
+                MiningSession.ad_view_id == ad_view_id,
+                MiningSession.epic_bonus_ad_view_id == ad_view_id,
+                MiningSession.speedup_ad_view_id == ad_view_id,
+            )
+        )
+        .first()
+    )
+    if already_used is not None:
+        raise AdViewAlreadyUsedError()
+
+
+def apply_epic_bonus(db: Session, user_id: int, session_id: int, ad_view_id: int) -> MiningSession:
+    """Cubo Épico (anúncio bônus, seção 7): usuário assiste um segundo
+    RewardedAd enquanto uma mineração normal já está rodando -- essa sessão
+    passa a pagar EPIC_BONUS_MULTIPLIER (1.25x) o value_per_session vigente
+    no momento da coleta, em vez do valor cheio. Só aplica o FLAG aqui; o
+    multiplicador de verdade só é lido em collect_mining_session, no
+    momento da coleta (o valor por sessão pode mudar entre o clique no
+    bônus e a coleta -- 1x/dia, ver reward.service).
+
+    Levanta SessionNotFoundError, SessionNotReadyError (sessão não está
+    RUNNING -- já coletada/expirada), EpicBonusAlreadyUsedError (só 1x por
+    sessão), AdViewNotConfirmedError ou AdViewAlreadyUsedError (ver
+    _consume_bonus_ad_view)."""
+    session = (
+        db.query(MiningSession)
+        .filter(MiningSession.id == session_id, MiningSession.user_id == user_id)
+        .with_for_update()
+        .first()
+    )
+    if session is None:
+        raise SessionNotFoundError()
+    if session.status != MiningSessionStatus.RUNNING:
+        raise SessionNotReadyError()
+    if session.epic_bonus_applied:
+        raise EpicBonusAlreadyUsedError()
+
+    _consume_bonus_ad_view(db, user_id, ad_view_id)
+
+    session.epic_bonus_applied = True
+    session.epic_bonus_ad_view_id = ad_view_id
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def apply_speedup(db: Session, user_id: int, session_id: int, ad_view_id: int) -> MiningSession:
+    """Acelerar (2x, seção 7): usuário assiste um RewardedAd enquanto a
+    mineração roda para reduzir o tempo restante pela metade
+    (ends_at -> now() + (ends_at - now())/2). Só 1x por sessão
+    (speedup_used).
+
+    Levanta SessionNotFoundError, SessionNotReadyError (sessão não está
+    RUNNING), SpeedupAlreadyUsedError, NothingToSpeedUpError (já não há
+    tempo restante -- ends_at já passou), AdViewNotConfirmedError ou
+    AdViewAlreadyUsedError (ver _consume_bonus_ad_view)."""
+    session = (
+        db.query(MiningSession)
+        .filter(MiningSession.id == session_id, MiningSession.user_id == user_id)
+        .with_for_update()
+        .first()
+    )
+    if session is None:
+        raise SessionNotFoundError()
+    if session.status != MiningSessionStatus.RUNNING:
+        raise SessionNotReadyError()
+    if session.speedup_used:
+        raise SpeedupAlreadyUsedError()
+
+    now = datetime.now(timezone.utc)
+    remaining = session.ends_at - now
+    if remaining <= timedelta(0):
+        raise NothingToSpeedUpError()
+
+    _consume_bonus_ad_view(db, user_id, ad_view_id)
+
+    session.ends_at = now + remaining * SPEEDUP_FACTOR
+    session.speedup_used = True
+    session.speedup_ad_view_id = ad_view_id
+    db.commit()
+    db.refresh(session)
     return session
 
 
@@ -233,6 +370,15 @@ def collect_mining_session(db: Session, user_id: int, session_id: int) -> tuple[
     # do eCPM real do AdMob -- ver app/modules/reward/service.py), não mais
     # um sorteio aleatório fixo.
     reward_amount = get_current_value_per_session(db)
+    if session.epic_bonus_applied:
+        # Cubo Épico -- ver apply_epic_bonus/EPIC_BONUS_MULTIPLIER. Lido do
+        # value_per_session VIGENTE agora (na coleta), não do valor de quando
+        # o bônus foi aplicado -- reward_config pode ter mudado entre os
+        # dois momentos (recalculada 1x/dia). ROUND_DOWN (nunca a favor do
+        # usuário), mesmo critério de compute_value_per_session.
+        reward_amount = (reward_amount * EPIC_BONUS_MULTIPLIER).quantize(
+            Decimal("0.01"), rounding=ROUND_DOWN
+        )
     max_allowed = reward_fund.balance * REWARD_FUND_SAFETY_MARGIN
     if reward_amount > max_allowed:
         # Falha segura: nada foi mutado ainda (nem reward_fund, nem a

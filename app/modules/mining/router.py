@@ -17,7 +17,9 @@ from app.modules.mining import service
 from app.schemas.mining import (
     MiningCollectRequest,
     MiningCollectResponse,
+    MiningEpicBonusRequest,
     MiningSessionRead,
+    MiningSpeedupRequest,
     MiningStartRequest,
     MiningStatusRead,
 )
@@ -45,6 +47,56 @@ def start(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "ad_view is not confirmed")
     except service.AdViewAlreadyUsedError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "ad_view already used to start a mining session")
+    return session
+
+
+@router.post("/epic-bonus", response_model=MiningSessionRead)
+def epic_bonus(
+    payload: MiningEpicBonusRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Cubo Épico -- assistir um segundo RewardedAd enquanto a mineração
+    roda para essa sessão pagar EPIC_BONUS_MULTIPLIER (1.25x) na coleta.
+    Ver docstring completa de service.apply_epic_bonus."""
+    try:
+        session = service.apply_epic_bonus(db, current_user.id, payload.session_id, payload.ad_view_id)
+    except service.SessionNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "mining session not found")
+    except service.SessionNotReadyError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "mining session is not running")
+    except service.EpicBonusAlreadyUsedError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "epic bonus already used for this session")
+    except service.AdViewNotConfirmedError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ad_view is not confirmed")
+    except service.AdViewAlreadyUsedError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ad_view already used")
+    return session
+
+
+@router.post("/speedup", response_model=MiningSessionRead)
+def speedup(
+    payload: MiningSpeedupRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Acelerar -- assistir um RewardedAd enquanto a mineração roda para
+    reduzir o tempo restante pela metade. Ver docstring completa de
+    service.apply_speedup."""
+    try:
+        session = service.apply_speedup(db, current_user.id, payload.session_id, payload.ad_view_id)
+    except service.SessionNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "mining session not found")
+    except service.SessionNotReadyError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "mining session is not running")
+    except service.SpeedupAlreadyUsedError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "speedup already used for this session")
+    except service.NothingToSpeedUpError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "mining session is already ready to collect")
+    except service.AdViewNotConfirmedError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ad_view is not confirmed")
+    except service.AdViewAlreadyUsedError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ad_view already used")
     return session
 
 

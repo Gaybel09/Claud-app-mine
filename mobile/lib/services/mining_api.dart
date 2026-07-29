@@ -16,6 +16,16 @@ abstract class MiningApi {
     required int sessionId,
     required String idempotencyKey,
   });
+
+  /// Cubo Épico -- assistir um segundo RewardedAd enquanto a mineração
+  /// roda pra essa sessão pagar +25% na coleta. Só 1x por sessão (ver
+  /// MiningSession.epicBonusApplied).
+  Future<MiningSession> applyEpicBonus({required int sessionId, required int adViewId});
+
+  /// Acelerar -- assistir um RewardedAd enquanto a mineração roda pra
+  /// reduzir o tempo restante pela metade. Só 1x por sessão (ver
+  /// MiningSession.speedupUsed).
+  Future<MiningSession> applySpeedup({required int sessionId, required int adViewId});
 }
 
 class HttpMiningApi implements MiningApi {
@@ -62,5 +72,23 @@ class HttpMiningApi implements MiningApi {
       extraHeaders: {'Idempotency-Key': idempotencyKey},
     );
     return MiningCollectResult.fromJson(data as Map<String, dynamic>);
+  }
+
+  @override
+  Future<MiningSession> applyEpicBonus({required int sessionId, required int adViewId}) async {
+    final data = await _client.post('/mining/epic-bonus', body: {
+      'session_id': sessionId,
+      'ad_view_id': adViewId,
+    });
+    return MiningSession.fromJson(data as Map<String, dynamic>);
+  }
+
+  @override
+  Future<MiningSession> applySpeedup({required int sessionId, required int adViewId}) async {
+    final data = await _client.post('/mining/speedup', body: {
+      'session_id': sessionId,
+      'ad_view_id': adViewId,
+    });
+    return MiningSession.fromJson(data as Map<String, dynamic>);
   }
 }

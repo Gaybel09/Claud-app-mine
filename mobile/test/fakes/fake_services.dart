@@ -202,6 +202,44 @@ class FakeMiningApi implements MiningApi {
     if (throwOnCollect != null) throw throwOnCollect!;
     return collectResult!;
   }
+
+  int epicBonusCallCount = 0;
+  int epicBonusFailuresBeforeSuccess = 0;
+  Object? throwOnEpicBonus;
+  MiningSession? epicBonusResult;
+  int? lastEpicBonusSessionId;
+  int? lastEpicBonusAdViewId;
+
+  @override
+  Future<MiningSession> applyEpicBonus({required int sessionId, required int adViewId}) async {
+    epicBonusCallCount++;
+    lastEpicBonusSessionId = sessionId;
+    lastEpicBonusAdViewId = adViewId;
+    if (throwOnEpicBonus != null) throw throwOnEpicBonus!;
+    if (epicBonusCallCount <= epicBonusFailuresBeforeSuccess) {
+      throw const ApiException(statusCode: 400, message: 'ad_view is not confirmed');
+    }
+    return epicBonusResult ?? sessionToReturn!;
+  }
+
+  int speedupCallCount = 0;
+  int speedupFailuresBeforeSuccess = 0;
+  Object? throwOnSpeedup;
+  MiningSession? speedupResult;
+  int? lastSpeedupSessionId;
+  int? lastSpeedupAdViewId;
+
+  @override
+  Future<MiningSession> applySpeedup({required int sessionId, required int adViewId}) async {
+    speedupCallCount++;
+    lastSpeedupSessionId = sessionId;
+    lastSpeedupAdViewId = adViewId;
+    if (throwOnSpeedup != null) throw throwOnSpeedup!;
+    if (speedupCallCount <= speedupFailuresBeforeSuccess) {
+      throw const ApiException(statusCode: 400, message: 'ad_view is not confirmed');
+    }
+    return speedupResult ?? sessionToReturn!;
+  }
 }
 
 class FakeWalletApi implements WalletApi {

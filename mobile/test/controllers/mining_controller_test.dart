@@ -107,6 +107,8 @@ void main() {
         startedAt: startedAt,
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 999;
 
@@ -129,6 +131,8 @@ void main() {
         startedAt: startedAt,
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 0; // status já vem ready_to_collect=true
 
@@ -150,6 +154,8 @@ void main() {
         startedAt: startedAt,
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: false,
       );
 
       await controller.watchAd();
@@ -173,6 +179,8 @@ void main() {
         startedAt: startedAt,
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: false,
       );
 
       await controller.watchAd();
@@ -232,6 +240,8 @@ void main() {
         startedAt: startedAt,
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 2;
       miningApi.collectResult = const MiningCollectResult(
@@ -260,6 +270,8 @@ void main() {
         startedAt: startedAt,
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: false,
       );
       miningApi.throwOnCollect = const ApiException(
         statusCode: 503,
@@ -285,6 +297,175 @@ void main() {
       expect(controller.stage, CubeCycleStage.idle);
       expect(controller.session, isNull);
       expect(controller.errorMessage, isNull);
+    });
+
+    Future<void> startMiningFor(MiningController controller) async {
+      await controller.loadCube();
+      final startedAt = DateTime.now();
+      miningApi.sessionToReturn = MiningSession(
+        id: 55,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 1,
+        startedAt: startedAt,
+        endsAt: startedAt.add(const Duration(hours: 2)),
+        status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: false,
+      );
+      // Nunca reporta ready_to_collect -- sem isso, o poll de status
+      // (miningStatusPollInterval, 10ms neste teste) reportaria pronto na
+      // primeira checagem (statusNotReadyCount default é 0) e a sessão
+      // sairia do estágio "mining" antes das asserções dos testes de bônus.
+      miningApi.statusNotReadyCount = 999;
+      await controller.watchAd();
+      await _waitUntil(() => controller.stage == CubeCycleStage.mining);
+    }
+
+    test('useEpicBonus watches an ad and applies the bonus to the session', () async {
+      await startMiningFor(controller);
+      final updated = MiningSession(
+        id: 55,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 1,
+        startedAt: controller.session!.startedAt,
+        endsAt: controller.session!.endsAt,
+        status: 'running',
+        epicBonusApplied: true,
+        speedupUsed: false,
+      );
+      miningApi.epicBonusResult = updated;
+
+      await controller.useEpicBonus();
+      await _waitUntil(() => controller.epicBonusStage == BonusActionStage.idle);
+
+      expect(controller.session!.epicBonusApplied, isTrue);
+      expect(miningApi.epicBonusCallCount, 1);
+      expect(miningApi.lastEpicBonusSessionId, 55);
+      expect(rewardedAdService.loadAndShowCallCount, 2); // 1 pra iniciar + 1 pro bônus
+    });
+
+    test('useEpicBonus does not call the API when the ad is not watched to the end', () async {
+      await startMiningFor(controller);
+      rewardedAdService.earnedReward = false;
+
+      await controller.useEpicBonus();
+
+      expect(controller.epicBonusStage, BonusActionStage.error);
+      expect(controller.epicBonusError, contains('até o fim'));
+      expect(miningApi.epicBonusCallCount, 0);
+    });
+
+    test('useEpicBonus does nothing when the bonus was already applied', () async {
+      await startMiningFor(controller);
+      controller.session = MiningSession(
+        id: 55,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 1,
+        startedAt: controller.session!.startedAt,
+        endsAt: controller.session!.endsAt,
+        status: 'running',
+        epicBonusApplied: true,
+        speedupUsed: false,
+      );
+
+      await controller.useEpicBonus();
+
+      expect(rewardedAdService.loadAndShowCallCount, 1); // só o do início da mineração
+      expect(miningApi.epicBonusCallCount, 0);
+    });
+
+    test('useEpicBonus surfaces a 409 (already used) without disrupting the mining stage', () async {
+      await startMiningFor(controller);
+      miningApi.throwOnEpicBonus = const ApiException(
+        statusCode: 409,
+        message: 'epic bonus already used for this session',
+      );
+
+      await controller.useEpicBonus();
+      await _waitUntil(() => controller.epicBonusStage == BonusActionStage.error);
+
+      expect(controller.epicBonusError, contains('already used'));
+      // A mineração em si continua rodando normalmente -- um erro no bônus
+      // não derruba a tela toda pro estado de erro genérico.
+      expect(controller.stage, CubeCycleStage.mining);
+    });
+
+    test('useSpeedup watches an ad and reduces the remaining time', () async {
+      await startMiningFor(controller);
+      final updated = MiningSession(
+        id: 55,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 1,
+        startedAt: controller.session!.startedAt,
+        endsAt: DateTime.now().add(const Duration(minutes: 30)),
+        status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: true,
+      );
+      miningApi.speedupResult = updated;
+
+      await controller.useSpeedup();
+      await _waitUntil(() => controller.speedupStage == BonusActionStage.idle);
+
+      expect(controller.session!.speedupUsed, isTrue);
+      expect(miningApi.speedupCallCount, 1);
+    });
+
+    test('useSpeedup does nothing when speedup was already used', () async {
+      await startMiningFor(controller);
+      controller.session = MiningSession(
+        id: 55,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 1,
+        startedAt: controller.session!.startedAt,
+        endsAt: controller.session!.endsAt,
+        status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: true,
+      );
+
+      await controller.useSpeedup();
+
+      expect(miningApi.speedupCallCount, 0);
+    });
+
+    test('useSpeedup retries while the ad_view is not confirmed yet, then succeeds', () async {
+      await startMiningFor(controller);
+      miningApi.speedupFailuresBeforeSuccess = 2;
+      miningApi.speedupResult = MiningSession(
+        id: 55,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 1,
+        startedAt: controller.session!.startedAt,
+        endsAt: controller.session!.endsAt,
+        status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: true,
+      );
+
+      await controller.useSpeedup();
+      await _waitUntil(() => controller.speedupStage == BonusActionStage.idle);
+
+      expect(controller.session!.speedupUsed, isTrue);
+      // 2 tentativas rejeitadas (ad ainda não confirmado) + 1 que teve sucesso.
+      expect(miningApi.speedupCallCount, 3);
+    });
+
+    test('useSpeedup gives up after the max polling attempts', () async {
+      await startMiningFor(controller);
+      miningApi.speedupFailuresBeforeSuccess = 999; // nunca confirma
+
+      await controller.useSpeedup();
+      await _waitUntil(() => controller.speedupStage == BonusActionStage.error);
+
+      expect(controller.speedupError, contains('demorou demais'));
+      expect(controller.stage, CubeCycleStage.mining);
     });
   });
 }

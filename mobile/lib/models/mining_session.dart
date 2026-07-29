@@ -7,6 +7,8 @@ class MiningSession {
     required this.startedAt,
     required this.endsAt,
     required this.status,
+    required this.epicBonusApplied,
+    required this.speedupUsed,
   });
 
   final int id;
@@ -16,6 +18,11 @@ class MiningSession {
   final DateTime startedAt;
   final DateTime endsAt;
   final String status;
+  // Cubo Épico (bônus de +25% na coleta) e Acelerar (reduz o tempo restante
+  // pela metade) -- cada um só pode ser usado 1x por sessão; a tela do cubo
+  // esconde o botão correspondente assim que o respectivo campo vira true.
+  final bool epicBonusApplied;
+  final bool speedupUsed;
 
   factory MiningSession.fromJson(Map<String, dynamic> json) {
     return MiningSession(
@@ -26,6 +33,8 @@ class MiningSession {
       startedAt: DateTime.parse(json['started_at'] as String),
       endsAt: DateTime.parse(json['ends_at'] as String),
       status: json['status'] as String,
+      epicBonusApplied: json['epic_bonus_applied'] as bool,
+      speedupUsed: json['speedup_used'] as bool,
     );
   }
 }

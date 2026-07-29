@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -34,3 +34,21 @@ class MiningSession(Base):
         String(20), nullable=False, default=MiningSessionStatus.RUNNING, server_default=MiningSessionStatus.RUNNING, index=True
     )
     ad_view_id: Mapped[int] = mapped_column(ForeignKey("ad_views.id"), nullable=False, index=True)
+
+    # Cubo Épico (anúncio bônus, seção 7): +25% no reward_amount desta sessão
+    # (ver EPIC_BONUS_MULTIPLIER em app/modules/mining/service.py) se o
+    # usuário assistir um segundo RewardedAd enquanto a mineração roda. Só 1x
+    # por sessão -- epic_bonus_applied vira true e nunca mais aceita outro
+    # ad_view (ver apply_epic_bonus). epic_bonus_ad_view_id guarda qual
+    # ad_view pagou o bônus, tanto pra auditoria quanto pra nunca deixar o
+    # mesmo ad_view ser reaproveitado em outro uso (start/speedup).
+    epic_bonus_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    epic_bonus_ad_view_id: Mapped[int | None] = mapped_column(ForeignKey("ad_views.id"), nullable=True)
+
+    # Acelerar (2x, seção 7): reduz o tempo restante pela metade (ends_at ->
+    # now + (ends_at - now)/2) se o usuário assistir um RewardedAd enquanto a
+    # mineração roda. Só 1x por sessão -- speedup_used vira true e nunca mais
+    # aceita outro ad_view (ver apply_speedup). Mesma lógica de
+    # speedup_ad_view_id que epic_bonus_ad_view_id acima.
+    speedup_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    speedup_ad_view_id: Mapped[int | None] = mapped_column(ForeignKey("ad_views.id"), nullable=True)

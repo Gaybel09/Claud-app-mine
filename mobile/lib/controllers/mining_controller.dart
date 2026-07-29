@@ -21,6 +21,14 @@ enum CubeCycleStage {
   error,
 }
 
+/// Estado de UI de um bônus opcional (Cubo Épico / Acelerar) -- separado do
+/// CubeCycleStage principal porque a mineração continua rodando em paralelo
+/// (o timer não pausa) enquanto o usuário assiste o anúncio bônus; uma
+/// falha aqui não deve derrubar a tela toda pro estado de erro genérico.
+enum BonusActionStage { idle, watchingAd, waitingConfirmation, error }
+
+enum _BonusKind { epic, speedup }
+
 /// Orquestra o ciclo do cubo (seção 7): assistir o RewardedAd (Google
 /// Mobile Ads) até o fim -> registrar e confirmar o ad_view no backend ->
 /// aguardar a confirmação liberar POST /mining/start -> aguardar ends_at ->
@@ -53,8 +61,15 @@ class MiningController extends ChangeNotifier {
   double? lastRewardAmount;
   String? errorMessage;
 
+  BonusActionStage epicBonusStage = BonusActionStage.idle;
+  String? epicBonusError;
+  BonusActionStage speedupStage = BonusActionStage.idle;
+  String? speedupError;
+
   Timer? _pollTimer;
   int _adConfirmationAttempts = 0;
+  Timer? _epicBonusPollTimer;
+  Timer? _speedupPollTimer;
 
   Future<void> loadCube() async {
     try {
@@ -238,18 +253,124 @@ class MiningController extends ChangeNotifier {
     }
   }
 
+  /// Cubo Épico -- assistir um segundo RewardedAd enquanto a mineração roda
+  /// pra essa sessão pagar +25% na coleta (ver backend POST
+  /// /mining/epic-bonus). Só 1x por sessão -- ver
+  /// MiningSession.epicBonusApplied.
+  Future<void> useEpicBonus() => _startBonusFlow(_BonusKind.epic);
+
+  /// Acelerar -- assistir um RewardedAd enquanto a mineração roda pra
+  /// reduzir o tempo restante pela metade (ver backend POST
+  /// /mining/speedup). Só 1x por sessão -- ver MiningSession.speedupUsed.
+  Future<void> useSpeedup() => _startBonusFlow(_BonusKind.speedup);
+
+  Future<void> _startBonusFlow(_BonusKind kind) async {
+    final currentSession = session;
+    if (currentSession == null) return;
+    if (kind == _BonusKind.epic && currentSession.epicBonusApplied) return;
+    if (kind == _BonusKind.speedup && currentSession.speedupUsed) return;
+
+    _setBonusStage(kind, BonusActionStage.watchingAd, error: null);
+
+    final earnedReward = await rewardedAdService.loadAndShow();
+    if (!earnedReward) {
+      _setBonusStage(
+        kind,
+        BonusActionStage.error,
+        error: 'Assista o anúncio até o fim para usar este bônus.',
+      );
+      return;
+    }
+
+    try {
+      final adView = await adsApi.watch(adNetwork: 'admob_rewarded');
+
+      // Mesma confirmação temporária via cliente que watchAd() usa -- ver
+      // docstring de AdsApi.confirm.
+      await adsApi.confirm(adViewId: adView.id, userId: currentSession.userId);
+
+      _setBonusStage(kind, BonusActionStage.waitingConfirmation, error: null);
+      _pollForBonus(
+        kind: kind,
+        apply: () => kind == _BonusKind.epic
+            ? miningApi.applyEpicBonus(sessionId: currentSession.id, adViewId: adView.id)
+            : miningApi.applySpeedup(sessionId: currentSession.id, adViewId: adView.id),
+      );
+    } on ApiException catch (e) {
+      _setBonusStage(kind, BonusActionStage.error, error: e.message);
+    }
+  }
+
+  void _pollForBonus({
+    required _BonusKind kind,
+    required Future<MiningSession> Function() apply,
+  }) {
+    (kind == _BonusKind.epic ? _epicBonusPollTimer : _speedupPollTimer)?.cancel();
+
+    int attempts = 0;
+    late Timer timer;
+    timer = Timer.periodic(adConfirmationPollInterval, (t) async {
+      attempts++;
+      try {
+        final updated = await apply();
+        t.cancel();
+        session = updated;
+        _setBonusStage(kind, BonusActionStage.idle, error: null);
+      } on ApiException catch (e) {
+        final adNotYetConfirmed = e.statusCode == 400;
+        final gaveUp = attempts >= maxAdConfirmationAttempts;
+        if (!adNotYetConfirmed || gaveUp) {
+          t.cancel();
+          _setBonusStage(
+            kind,
+            BonusActionStage.error,
+            error: adNotYetConfirmed
+                ? 'A confirmação do anúncio demorou demais. Tente de novo.'
+                : e.message,
+          );
+        }
+        // Senão: o callback do SDK ainda não confirmou -- continua tentando.
+      }
+    });
+
+    if (kind == _BonusKind.epic) {
+      _epicBonusPollTimer = timer;
+    } else {
+      _speedupPollTimer = timer;
+    }
+  }
+
+  void _setBonusStage(_BonusKind kind, BonusActionStage newStage, {required String? error}) {
+    if (kind == _BonusKind.epic) {
+      epicBonusStage = newStage;
+      epicBonusError = error;
+    } else {
+      speedupStage = newStage;
+      speedupError = error;
+    }
+    notifyListeners();
+  }
+
   /// Volta pro estado inicial para um novo ciclo (novo anúncio, nova sessão).
   void resetToIdle() {
     _pollTimer?.cancel();
+    _epicBonusPollTimer?.cancel();
+    _speedupPollTimer?.cancel();
     stage = CubeCycleStage.idle;
     lastRewardAmount = null;
     errorMessage = null;
+    epicBonusStage = BonusActionStage.idle;
+    epicBonusError = null;
+    speedupStage = BonusActionStage.idle;
+    speedupError = null;
     notifyListeners();
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _epicBonusPollTimer?.cancel();
+    _speedupPollTimer?.cancel();
     super.dispose();
   }
 }

@@ -114,7 +114,17 @@ class _CubeScreenState extends State<CubeScreen> {
           showSpinner: true,
         );
       case CubeCycleStage.mining:
-        return _MiningState(progress: _progress, endsAt: controller.session!.endsAt);
+        return _MiningState(
+          progress: _progress,
+          endsAt: controller.session!.endsAt,
+          session: controller.session!,
+          epicBonusStage: controller.epicBonusStage,
+          epicBonusError: controller.epicBonusError,
+          onEpicBonus: controller.useEpicBonus,
+          speedupStage: controller.speedupStage,
+          speedupError: controller.speedupError,
+          onSpeedup: controller.useSpeedup,
+        );
       case CubeCycleStage.readyToCollect:
         return _ReadyState(onCollect: controller.collect);
       case CubeCycleStage.collecting:
@@ -184,10 +194,27 @@ class _MessageState extends StatelessWidget {
 }
 
 class _MiningState extends StatelessWidget {
-  const _MiningState({required this.progress, required this.endsAt});
+  const _MiningState({
+    required this.progress,
+    required this.endsAt,
+    required this.session,
+    required this.epicBonusStage,
+    required this.epicBonusError,
+    required this.onEpicBonus,
+    required this.speedupStage,
+    required this.speedupError,
+    required this.onSpeedup,
+  });
 
   final double progress;
   final DateTime endsAt;
+  final MiningSession session;
+  final BonusActionStage epicBonusStage;
+  final String? epicBonusError;
+  final VoidCallback onEpicBonus;
+  final BonusActionStage speedupStage;
+  final String? speedupError;
+  final VoidCallback onSpeedup;
 
   @override
   Widget build(BuildContext context) {
@@ -204,6 +231,76 @@ class _MiningState extends StatelessWidget {
         NeonProgressBar(progress: progress),
         const SizedBox(height: 12),
         Text(remainingText, style: Theme.of(context).textTheme.bodyMedium),
+        const SizedBox(height: 24),
+        _BonusButton(
+          buttonKey: const Key('epic_bonus_button'),
+          label: 'Cubo Épico: assista mais um anúncio pra ganhar um bônus',
+          visible: !session.epicBonusApplied,
+          stage: epicBonusStage,
+          errorMessage: epicBonusError,
+          onPressed: onEpicBonus,
+        ),
+        const SizedBox(height: 12),
+        _BonusButton(
+          buttonKey: const Key('speedup_button'),
+          label: 'Acelerar (2x): assista um anúncio',
+          visible: !session.speedupUsed,
+          stage: speedupStage,
+          errorMessage: speedupError,
+          onPressed: onSpeedup,
+        ),
+      ],
+    );
+  }
+}
+
+class _BonusButton extends StatelessWidget {
+  const _BonusButton({
+    required this.buttonKey,
+    required this.label,
+    required this.visible,
+    required this.stage,
+    required this.errorMessage,
+    required this.onPressed,
+  });
+
+  final Key buttonKey;
+  final String label;
+  final bool visible;
+  final BonusActionStage stage;
+  final String? errorMessage;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!visible) return const SizedBox.shrink();
+
+    final isBusy =
+        stage == BonusActionStage.watchingAd || stage == BonusActionStage.waitingConfirmation;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        OutlinedButton(
+          key: buttonKey,
+          onPressed: isBusy ? null : onPressed,
+          child: isBusy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(label, textAlign: TextAlign.center),
+        ),
+        if (stage == BonusActionStage.error && errorMessage != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              errorMessage!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+          ),
       ],
     );
   }
