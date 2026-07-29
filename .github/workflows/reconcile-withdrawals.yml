@@ -1,0 +1,38 @@
+name: Reconcile stuck Pix withdrawals (temporary, free bridge)
+
+# PONTE TEMPORÁRIA: cobre a lacuna de reconciliação automática de saques Pix
+# enquanto o Background Worker de verdade (render.yaml, serviço
+# cubemine-pix-reconcile-worker) não está aprovado/implantado -- ver README
+# ("Reconciliação automática de saques Pix"). Chama POST
+# /admin/withdrawals/reconcile-all a cada poucos minutos, protegido pelo
+# mesmo ADMIN_SMOKE_TEST_TOKEN já usado pelos outros endpoints de
+# diagnóstico admin.
+#
+# DESATIVE ESTE WORKFLOW assim que o worker Celery real entrar no ar --
+# deixar os dois rodando ao mesmo tempo não quebra nada (reconciliar um
+# saque já resolvido não faz nada, ver apply_efi_status), só desperdiça
+# chamadas e minutos do Actions à toa.
+#
+# Requer o secret ADMIN_SMOKE_TEST_TOKEN configurado no repositório
+# (Settings -> Secrets and variables -> Actions -> New repository secret),
+# com o MESMO valor já configurado no dashboard do Render para o serviço
+# web cubemine-pix-api.
+
+on:
+  schedule:
+    # GitHub interpreta "schedule" sempre em UTC; 5min é o menor intervalo
+    # suportado por workflows agendados (execuções podem atrasar um pouco
+    # em períodos de alta demanda no Actions -- não é um cron garantido ao
+    # segundo).
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call POST /admin/withdrawals/reconcile-all
+        run: |
+          curl -sS --fail-with-body -X POST \
+            "https://cubemine-pix-api.onrender.com/admin/withdrawals/reconcile-all" \
+            -H "X-Admin-Token: ${{ secrets.ADMIN_SMOKE_TEST_TOKEN }}"

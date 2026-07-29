@@ -57,31 +57,58 @@ def send_mining_ready_notification(mining_session_id: int) -> None:
     logger.info("mining session %s is ready to collect", mining_session_id)
 
 
+def find_stuck_processing_withdrawals(db: Session) -> list[Withdrawal]:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=RECONCILE_AFTER_MINUTES)
+    return (
+        db.query(Withdrawal)
+        .filter(Withdrawal.status == WithdrawalStatus.PROCESSING, Withdrawal.created_at < cutoff)
+        .all()
+    )
+
+
+def reconcile_stuck_withdrawals(db: Session) -> list[Withdrawal]:
+    """Reconcilia todo saque preso em "processing" há mais de
+    RECONCILE_AFTER_MINUTES -- lógica compartilhada entre o worker Celery
+    periódico (reconcile_pending_withdrawals, abaixo) e o endpoint HTTP de
+    reconciliação em lote (POST /admin/withdrawals/reconcile-all, ponte
+    gratuita via GitHub Actions enquanto o worker Celery de verdade não
+    está aprovado/implantado -- ver render.yaml e README).
+
+    Devolve a lista de withdrawals processados (objetos já atualizados na
+    própria sessão, se a Efí confirmou uma mudança de status) -- útil pro
+    endpoint HTTP reportar o que aconteceu; o worker periódico ignora o
+    retorno."""
+    stuck = find_stuck_processing_withdrawals(db)
+    for withdrawal in stuck:
+        reconcile_withdrawal(db, withdrawal)
+    return stuck
+
+
 @celery_app.task(name="pix.reconcile_pending_withdrawals")
 def reconcile_pending_withdrawals() -> None:
     """Seção 11, correção v2: webhooks podem chegar fora de ordem, duplicados
     ou nunca chegar. Todo withdrawal parado em "processing" há mais de
     RECONCILE_AFTER_MINUTES consulta o status real na Efí em vez de confiar
     só no webhook."""
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=RECONCILE_AFTER_MINUTES)
     db = SessionLocal()
     try:
-        stuck = (
-            db.query(Withdrawal)
-            .filter(Withdrawal.status == WithdrawalStatus.PROCESSING, Withdrawal.created_at < cutoff)
-            .all()
-        )
-        for withdrawal in stuck:
-            reconcile_withdrawal(db, withdrawal)
+        reconcile_stuck_withdrawals(db)
     finally:
         db.close()
 
 
 @celery_app.task(name="reward.update_reward_config")
 def update_reward_config() -> None:
-    """Roda 1x/dia (ver beat_schedule em app/workers/celery_app.py): busca o
-    eCPM médio do dia anterior no bloco de anúncios premiado via AdMob
-    Reporting API e atualiza o valor de recompensa por sessão vigente
+    """Roda 1x/dia, mas NÃO via celery_app.conf.beat_schedule -- o
+    agendamento de verdade é o Cron Job dedicado em render.yaml, que chama
+    GET /admin/update-reward-config (mais barato pra uma tarefa diária,
+    cobrado só pelos segundos de execução, do que manter esse Background
+    Worker rodando 24/7 só por causa dela). Esta task Celery permanece
+    definida e chamável (ex: testes, uso manual futuro), só não está no
+    beat_schedule pra não duplicar a consulta à AdMob Reporting API todo
+    dia. Busca o eCPM médio do dia anterior no bloco de anúncios premiado
+    via AdMob Reporting API e atualiza o valor de recompensa por sessão
+    vigente
     (seção 7) -- ver app/modules/reward/service.py.
 
     Não levanta em caso de falha (credenciais da AdMob não configuradas,

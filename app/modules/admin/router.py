@@ -11,6 +11,7 @@ from app.modules.admin.register_webhook import run_register_efi_webhook
 from app.modules.admin.smoke_test import run_pix_smoke_test
 from app.modules.mining.service import force_session_ready_for_testing
 from app.modules.reward.service import update_reward_config_from_admob
+from app.workers.tasks import reconcile_stuck_withdrawals
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -143,6 +144,41 @@ def update_reward_config(db: Session = Depends(get_db)):
         "value_per_session": str(config.value_per_session),
         "avg_ecpm": str(config.avg_ecpm) if config.avg_ecpm is not None else None,
         "updated_at": config.updated_at.isoformat(),
+    }
+
+
+@router.post("/withdrawals/reconcile-all", dependencies=[Depends(require_admin_token)])
+def reconcile_all_withdrawals(db: Session = Depends(get_db)):
+    """Reconcilia de uma vez todo saque preso em "processing" há mais de
+    RECONCILE_AFTER_MINUTES (app/modules/pix/service.py) -- mesma lógica
+    exata do worker Celery periódico (pix.reconcile_pending_withdrawals),
+    só disparada via HTTP em vez de esperar o Celery Beat rodar.
+
+    PONTE TEMPORÁRIA: existe para cobrir a lacuna de reconciliação
+    automática enquanto o Background Worker de verdade (render.yaml,
+    serviço cubemine-pix-reconcile-worker) ainda não foi aprovado/
+    implantado (custo mensal recorrente, decisão separada) -- um agendador
+    externo gratuito (GitHub Actions cron, ver
+    .github/workflows/reconcile-withdrawals.yml e README) chama esta rota
+    a cada poucos minutos. Assim que o worker real entrar no ar, esta rota
+    (e o workflow) devem ser desativados -- deixá-los ligados não quebra
+    nada (reconciliar um saque já resolvido não faz nada, ver
+    apply_efi_status), só desperdiça chamadas.
+
+    AO CONTRÁRIO de /admin/smoke-test/pix e /admin/register-efi-webhook,
+    não é protegida por ENABLE_DIAGNOSTIC_ENDPOINTS -- precisa continuar
+    acessível em produção real enquanto o agendador externo estiver
+    chamando (mesmo padrão de /admin/update-reward-config e
+    /admin/promote-user). Nunca levanta por falha ao consultar a Efí num
+    saque específico -- só loga e segue pro próximo (mesmo comportamento
+    do worker periódico), pra um saque com problema não impedir a
+    reconciliação dos demais."""
+    reconciled = reconcile_stuck_withdrawals(db)
+    return {
+        "reconciled_count": len(reconciled),
+        "withdrawals": [
+            {"id": w.id, "status": w.status, "failure_reason": w.failure_reason} for w in reconciled
+        ],
     }
 
 

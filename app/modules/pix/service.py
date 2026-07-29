@@ -14,8 +14,17 @@ logger = logging.getLogger(__name__)
 
 # Seção 11, correção v2: todo withdrawal parado em "processing" há mais de
 # tanto tempo é reconciliado consultando a Efí diretamente, em vez de
-# depender só do webhook.
-RECONCILE_AFTER_MINUTES = 10
+# depender só do webhook. Baixado de 10 para 3 quando passou a existir uma
+# reconciliação automática de verdade rodando em produção -- primeiro via
+# POST /admin/withdrawals/reconcile-all chamado a cada 5min pelo GitHub
+# Actions (.github/workflows/reconcile-withdrawals.yml, ponte gratuita,
+# temporária), depois pelo worker Celery dedicado (pix.
+# reconcile_pending_withdrawals, ver render.yaml) quando este for
+# aprovado/implantado. Antes de qualquer um dos dois existir, este valor
+# não tinha efeito prático nenhum (nada consultava a Efí periodicamente).
+# get_send_status é uma consulta de leitura, sem custo real de reconciliar
+# mais cedo -- só reduz o pior caso de espera até a confirmação automática.
+RECONCILE_AFTER_MINUTES = 3
 
 # Tamanho máximo guardado em withdrawals.failure_reason -- a mensagem de erro
 # da Efí (corpo da resposta HTTP) não costuma conter segredo nenhum (é uma

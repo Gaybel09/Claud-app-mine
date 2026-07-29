@@ -130,14 +130,42 @@ inclui o corpo cru da resposta da Efí, só o status HTTP. Não exige login;
 cada chamada faz uma autenticação real (não reaproveita token cacheado), só
 para diagnóstico.
 
-O saldo só é debitado quando `POST /pix/webhook` confirma `status:
-REALIZADO` -- nunca no momento de `POST /pix/withdraw`. Um worker Celery
-periódico (`pix.reconcile_pending_withdrawals`, agendado a cada 5min via
-Celery Beat em `app/workers/celery_app.py`) consulta a Efí diretamente para
-todo saque parado em `processing` há mais de 10 minutos, para não depender
-só do webhook. Esse worker/beat ainda não está no `render.yaml` -- precisa
-de um serviço `celery -A app.workers.celery_app worker` e outro `celery -A
-app.workers.celery_app beat` rodando além da API.
+O saldo só é debitado quando `POST /pix/webhook` (ou `/pix/webhook/pix` --
+ver nota sobre o sufixo automático da Efí logo abaixo) confirma `status:
+REALIZADO` -- nunca no momento de `POST /pix/withdraw`. A confiabilidade do
+webhook sozinho nunca foi comprovada (ver `POST /admin/withdrawals/{id}/
+reconcile`, a via manual usada pra investigar isso -- saque #10 ficou
+34+min preso em `processing` mesmo com o webhook já corrigido), então
+existem DUAS redes de segurança independentes dele, cobrindo todo saque
+parado em `processing` há mais de `RECONCILE_AFTER_MINUTES` (3min,
+`app/modules/pix/service.py`):
+
+1. **`POST /admin/withdrawals/reconcile-all`** (`app/modules/admin/router.py`,
+   protegido por `ADMIN_SMOKE_TEST_TOKEN`, mesmo padrão de
+   `/admin/update-reward-config` -- funciona mesmo com
+   `ENABLE_DIAGNOSTIC_ENDPOINTS` desligada, porque precisa continuar
+   acessível em produção real). Reconcilia TODOS os saques presos de uma
+   vez, chamável por HTTP sem esperar nada -- pensado pra ser acionado por
+   um agendador externo gratuito. Ver `.github/workflows/
+   reconcile-withdrawals.yml`: um workflow do GitHub Actions que chama esse
+   endpoint a cada 5min via `cron`, sem custar nada (cota gratuita do
+   Actions), enquanto o Background Worker de verdade (item 2) não está
+   aprovado/implantado. Requer o secret `ADMIN_SMOKE_TEST_TOKEN` configurado
+   no repositório (Settings -> Secrets and variables -> Actions), com o
+   MESMO valor já configurado no dashboard do Render.
+2. **Worker Celery periódico** (`pix.reconcile_pending_withdrawals`,
+   `app/workers/celery_app.py`) -- roda como processo dedicado 24/7
+   (serviço `cubemine-pix-reconcile-worker` no `render.yaml`, `celery -A
+   app.workers.celery_app worker --beat`, beat embutido, checando a cada
+   60s). Mais caro (Background Worker é cobrado pelo mês inteiro, ao
+   contrário do Cron Job/GitHub Actions do item 1) mas não depende de um
+   serviço externo (GitHub Actions) nem de um cron de 5min em vez de 60s.
+   **Assim que este worker estiver aprovado e implantado, desative o
+   workflow do GitHub Actions do item 1** (Settings -> Actions -> disable
+   workflow, ou apague o arquivo) -- deixar os dois rodando ao mesmo tempo
+   não quebra nada (reconciliar um saque já resolvido é um no-op), só
+   desperdiça chamadas. Nunca escale esse serviço para mais de 1 instância
+   (o beat embutido duplicaria as tarefas agendadas).
 
 ### Migração de homologação para produção
 
@@ -248,8 +276,8 @@ exposto aqui, no diagnóstico -- nunca em `POST /pix/withdraw` ou `GET
 
 Passe `?force_reconcile=true` para rodar, logo depois do saque, a mesma
 lógica do worker periódico (`pix.reconcile_pending_withdrawals`) na hora --
-sem esperar o agendamento do Celery Beat (5min) nem o corte de
-`RECONCILE_AFTER_MINUTES` (10min). Útil pra confirmar que o fluxo funciona
+sem esperar o agendamento do Celery Beat (60s) nem o corte de
+`RECONCILE_AFTER_MINUTES` (3min). Útil pra confirmar que o fluxo funciona
 só com a reconciliação, sem depender do webhook receber corretamente (ex:
 mTLS de recebimento não é viável no plano gratuito do Render). Adiciona uma
 etapa `pix_reconcile` com `status_before`/`status_after`/`failure_reason`,
@@ -351,10 +379,14 @@ curl -X POST -H "X-Admin-Token: SEU_TOKEN" https://SEU_HOST/admin/promote-user/4
 | `GET /admin/users/{id}/devices` | Antifraude básico (seção 11) -- quantos usuários distintos compartilham o mesmo `device_id` deste usuário. Ver seção abaixo |
 
 **Sobre `POST /admin/withdrawals/{id}/approve`**: o fluxo normal de
-confirmação é 100% automático -- via webhook (`POST /pix/webhook`) ou, se
-ele não chegar, via reconciliação periódica (`pix.reconcile_pending_withdrawals`,
-a cada 5min, para saques parados em `processing` há mais de
-`RECONCILE_AFTER_MINUTES`). Este endpoint é só a via de escape manual para
+confirmação é 100% automático -- via webhook (`POST /pix/webhook`/
+`/pix/webhook/pix`) ou, se ele não chegar, via reconciliação periódica
+(`pix.reconcile_pending_withdrawals`, a cada 60s, para saques parados em
+`processing` há mais de `RECONCILE_AFTER_MINUTES`) rodando de verdade em
+produção (serviço `cubemine-pix-reconcile-worker`, `render.yaml`). Há
+também `POST /admin/withdrawals/{id}/reconcile` para reconciliar um saque
+específico na hora, sem esperar o worker periódico. `POST
+.../{id}/approve` abaixo é só a via de escape manual para
 quando as duas falharem (ex: Efí fora do ar por um tempo prolongado) **e**
 um admin já confirmou de forma independente, olhando o extrato/dashboard da
 própria Efí, que a transferência realmente aconteceu -- ele debita o saldo
