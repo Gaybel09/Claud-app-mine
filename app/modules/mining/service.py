@@ -167,7 +167,23 @@ def _consume_bonus_ad_view(db: Session, user_id: int, ad_view_id: int) -> None:
     start_mining_session -- nunca só o aviso do cliente), e (3) nunca ter
     sido consumido antes, nem pra iniciar uma sessão (MiningSession.ad_view_id)
     nem pro outro bônus (epic_bonus_ad_view_id/speedup_ad_view_id) -- sem
-    isso, um único anúncio assistido poderia "pagar" duas vezes."""
+    isso, um único anúncio assistido poderia "pagar" duas vezes.
+
+    PENDÊNCIA CONHECIDA (baixa prioridade, aceita por ora -- revisar mais
+    pra frente): a checagem "já usado" abaixo é uma leitura sem lock, então
+    duas chamadas concorrentes referenciando o MESMO ad_view_id mas
+    SESSÕES DIFERENTES (ex: epic-bonus na sessão A e speedup na sessão B ao
+    mesmo tempo) poderiam, em teoria, passar as duas antes de qualquer uma
+    commitar -- consumindo o mesmo ad_view duas vezes. O lock de linha em
+    apply_epic_bonus/apply_speedup (with_for_update no MiningSession) só
+    serializa chamadas para a MESMA sessão, não protege entre sessões
+    diferentes. Só explorável via cliente malicioso forjando requisições
+    cruas (o app legítimo sempre gera um ad_view novo antes de cada ação) --
+    mesmo padrão (e mesmo risco aceito) já existente em start_mining_session
+    (linha ~141 acima) desde antes deste módulo existir. Fix real, se algum
+    dia justificar a prioridade: with_for_update() na própria linha de
+    AdView (não só no MiningSession) antes da checagem, nos três pontos de
+    consumo (start/epic-bonus/speedup)."""
     if not is_ad_confirmed(db, ad_view_id):
         raise AdViewNotConfirmedError()
 
