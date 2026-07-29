@@ -33,6 +33,18 @@ class _CubeScreenState extends State<CubeScreen> {
   late final MiningController _controller;
   Timer? _progressTicker;
   double _progress = 0;
+  // endsAt que o _progressTicker atual está usando -- comparado a cada
+  // notifyListeners() pra saber se precisa reiniciar o ticker (ver
+  // _onControllerChanged). Sem isso, usar o Acelerar (que muda
+  // session.endsAt no meio da mineração) não tinha efeito nenhum na barra
+  // de progresso: o Timer.periodic já rodando desde o início da mineração
+  // fecha sobre o objeto MiningSession de ENTÃO, e só reiniciava quando
+  // _progressTicker == null -- ou seja, nunca de novo depois do primeiro
+  // start. O texto "Xh Ymin restantes" (recalculado do zero a cada rebuild
+  // em _MiningState) sempre mostrava o valor certo; só a barra visual
+  // ficava presa na trajetória antiga, sem refletir a redução real do
+  // tempo.
+  DateTime? _tickedEndsAt;
 
   @override
   void initState() {
@@ -50,16 +62,19 @@ class _CubeScreenState extends State<CubeScreen> {
 
   void _onControllerChanged() {
     final session = _controller.session;
-    if (session != null && _progressTicker == null) {
+    if (session != null && (_progressTicker == null || _tickedEndsAt != session.endsAt)) {
       _startProgressTicker(session);
     } else if (session == null) {
       _progressTicker?.cancel();
       _progressTicker = null;
+      _tickedEndsAt = null;
     }
     setState(() {});
   }
 
   void _startProgressTicker(MiningSession session) {
+    _progressTicker?.cancel();
+    _tickedEndsAt = session.endsAt;
     _updateProgress(session);
     _progressTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       _updateProgress(session);

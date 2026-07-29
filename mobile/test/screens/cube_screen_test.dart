@@ -7,6 +7,7 @@ import 'package:cubemine_pix/services/cubes_api.dart';
 import 'package:cubemine_pix/services/mining_api.dart';
 import 'package:cubemine_pix/services/rewarded_ad_service.dart';
 import 'package:cubemine_pix/theme/app_theme.dart';
+import 'package:cubemine_pix/widgets/neon_progress_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -243,6 +244,8 @@ void main() {
       WidgetTester tester, {
       bool epicBonusApplied = false,
       bool speedupUsed = false,
+      DateTime? startedAt,
+      DateTime? endsAt,
     }) async {
       final cubesApi = FakeCubesApi()
         ..cubes = [
@@ -257,14 +260,14 @@ void main() {
         ];
       final adsApi = FakeAdsApi();
       final miningApi = FakeMiningApi();
-      final startedAt = DateTime.now();
+      final resolvedStartedAt = startedAt ?? DateTime.now();
       miningApi.activeSessionToReturn = MiningSession(
         id: 88,
         userId: 1,
         cubeId: 1,
         adViewId: 3,
-        startedAt: startedAt,
-        endsAt: startedAt.add(const Duration(hours: 2)),
+        startedAt: resolvedStartedAt,
+        endsAt: endsAt ?? resolvedStartedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: epicBonusApplied,
         speedupUsed: speedupUsed,
@@ -375,6 +378,66 @@ void main() {
       // tentar de novo, a tela não vira o estado de erro genérico.
       expect(find.byKey(const Key('epic_bonus_button')), findsOneWidget);
       expect(find.byKey(const Key('cube_error_text')), findsNothing);
+    });
+
+    testWidgets(
+        'regression: the progress bar reflects the shortened ends_at after Acelerar, not the '
+        'original one', (tester) async {
+      // Bug real encontrado por inspeção de código: o Timer.periodic de
+      // _CubeScreenState (_progressTicker) fecha sobre o objeto
+      // MiningSession de quando a mineração começou e só era reiniciado se
+      // _progressTicker == null -- ou seja, nunca de novo depois do
+      // primeiro start. Usar o Acelerar atualiza controller.session com um
+      // ends_at novo, mas a barra de progresso continuava calculando com o
+      // ends_at ANTIGO (o texto "Xh Ymin restantes" em _MiningState estava
+      // certo, por ser recalculado do zero a cada rebuild -- só a barra
+      // visual ficava presa).
+      final startedAt = DateTime.now().subtract(const Duration(minutes: 90));
+      final originalEndsAt = startedAt.add(const Duration(minutes: 120)); // progresso ~0.75
+      final miningApi = await pumpRunningMiningScreen(
+        tester,
+        startedAt: startedAt,
+        endsAt: originalEndsAt,
+      );
+
+      // Deixa o ticker de 1s (real, não fake) calcular o progresso inicial.
+      await tester.pump(const Duration(seconds: 1, milliseconds: 100));
+      final progressBefore = tester
+          .widget<NeonProgressBar>(find.byType(NeonProgressBar))
+          .progress;
+      expect(progressBefore, closeTo(0.75, 0.02));
+
+      // Acelerar reduz o tempo restante (ends_at - now) pela metade --
+      // muda o ends_at de +30min pra +15min a partir de agora, encurtando
+      // a duração TOTAL da sessão de 120min pra ~105min.
+      miningApi.speedupResult = MiningSession(
+        id: 88,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 3,
+        startedAt: startedAt,
+        endsAt: DateTime.now().add(const Duration(minutes: 15)),
+        status: 'running',
+        epicBonusApplied: false,
+        speedupUsed: true,
+      );
+
+      await tester.tap(find.byKey(const Key('speedup_button')));
+      await tester.pump();
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      // Mais um tick do progressTicker (1s) depois do speedup já ter sido
+      // aplicado, pra dar chance da barra recalcular.
+      await tester.pump(const Duration(seconds: 1, milliseconds: 100));
+
+      final progressAfter = tester
+          .widget<NeonProgressBar>(find.byType(NeonProgressBar))
+          .progress;
+      // Com o bug: progressAfter ficaria travado em ~0.75 (mesmo valor de
+      // antes, calculado contra o ends_at antigo). Correto: ~90/105 ≈ 0.857.
+      expect(progressAfter, closeTo(90 / 105, 0.02));
+      expect(progressAfter, isNot(closeTo(progressBefore, 0.01)));
     });
   });
 }
