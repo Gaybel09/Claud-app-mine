@@ -63,9 +63,6 @@ def _use_fx_rate_of_one(monkeypatch) -> None:
 
 
 def test_compute_value_per_session_applies_margin_and_rounds_down():
-    # eCPM 20.00, margem 0.5 -> (20.00 * 0.5) / 1000 = 0.01 -- já no piso
-    # (MIN_REWARD), então o teste abaixo usa um eCPM maior para exercitar o
-    # cálculo "livre" (sem bater em nenhum dos limites de segurança).
     avg_ecpm = Decimal("600.00")  # (600 * 0.5) / 1000 = 0.30
     assert compute_value_per_session(avg_ecpm) == Decimal("0.30")
 
@@ -78,10 +75,23 @@ def test_compute_value_per_session_rounds_down_not_to_nearest():
 
 
 def test_compute_value_per_session_clamps_to_min_reward():
-    # eCPM muito baixo (ou zero) não pode gerar um valor por sessão abaixo
-    # do piso de segurança.
+    # eCPM zero (ou negativo/corrompido) não pode gerar um valor por sessão
+    # zero ou negativo -- MIN_REWARD aqui é só essa proteção, não um "prêmio
+    # mínimo" artificial acima do que o eCPM real sustenta.
     assert compute_value_per_session(Decimal("0.00")) == MIN_REWARD
-    assert compute_value_per_session(Decimal("1.00")) == MIN_REWARD
+    assert compute_value_per_session(Decimal("-5.00")) == MIN_REWARD
+
+
+def test_compute_value_per_session_does_not_inflate_low_but_real_ecpm():
+    # eCPM baixo só o suficiente para dar um valor bruto abaixo do antigo
+    # piso de R$0,10 (ex: tráfego ainda pequeno pré-lançamento) não deve mais
+    # ser inflado até R$0,10 -- só o cálculo real (arredondado para baixo),
+    # respeitando o piso de segurança de R$0,01.
+    avg_ecpm = Decimal("10.00")  # (10.00 * 0.5) / 1000 = 0.005 -> arredonda para 0.00, clampado a 0.01
+    assert compute_value_per_session(avg_ecpm) == Decimal("0.01")
+
+    avg_ecpm_slightly_higher = Decimal("120.00")  # (120 * 0.5) / 1000 = 0.06
+    assert compute_value_per_session(avg_ecpm_slightly_higher) == Decimal("0.06")
 
 
 def test_compute_value_per_session_clamps_to_max_reward():

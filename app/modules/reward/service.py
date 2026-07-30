@@ -11,11 +11,18 @@ from app.models.reward_config import SINGLETON_ID, RewardConfig
 logger = logging.getLogger(__name__)
 
 # Faixa de segurança para o valor por sessão calculado a partir do eCPM
-# (seção 7): protege contra um dado anômalo/corrompido vindo da AdMob
-# Reporting API (ex: eCPM absurdamente alto num dia de pico) resultar num
-# valor de recompensa fora do que o produto suporta. Mesmos limites usados
-# antes desta integração (sorteio aleatório fixo em mining/service.py).
-MIN_REWARD = Decimal("0.10")
+# (seção 7). MAX_REWARD protege contra um dado anômalo/corrompido vindo da
+# AdMob Reporting API (ex: eCPM absurdamente alto num dia de pico) resultar
+# num valor de recompensa fora do que o produto suporta.
+#
+# MIN_REWARD NÃO é mais um "prêmio mínimo" artificial -- é só uma proteção
+# contra o cálculo bruto dar zero ou negativo (eCPM ausente/zerado). Em
+# tráfego baixo (ex: pré-lançamento), um piso alto (o antigo R$0,10) fazia a
+# reward_config pagar sistematicamente mais do que a receita real gerada
+# pelo eCPM do dia, criando prejuízo garantido por design, não só ocasional
+# num pico de eCPM baixo. R$0,01 mantém a proteção contra valor zero/negativo
+# sem forçar um piso artificialmente alto.
+MIN_REWARD = Decimal("0.01")
 MAX_REWARD = Decimal("1.00")
 
 
