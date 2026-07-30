@@ -40,6 +40,7 @@ void main() {
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 1;
@@ -170,6 +171,7 @@ void main() {
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 999;
@@ -243,6 +245,7 @@ void main() {
     Future<FakeMiningApi> pumpRunningMiningScreen(
       WidgetTester tester, {
       bool epicBonusApplied = false,
+      int? epicBonusVideosWatched,
       bool speedupUsed = false,
       DateTime? startedAt,
       DateTime? endsAt,
@@ -270,6 +273,7 @@ void main() {
         endsAt: endsAt ?? resolvedStartedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: epicBonusApplied,
+        epicBonusVideosWatched: epicBonusVideosWatched ?? (epicBonusApplied ? epicBonusVideosRequired : 0),
         speedupUsed: speedupUsed,
       );
       miningApi.statusNotReadyCount = 999;
@@ -309,7 +313,9 @@ void main() {
       expect(find.byKey(const Key('speedup_button')), findsNothing);
     });
 
-    testWidgets('tapping the epic bonus button watches an ad and hides the button once applied', (tester) async {
+    testWidgets(
+        'tapping the epic bonus button watches the first video and updates the progress dots '
+        'without unlocking yet', (tester) async {
       final miningApi = await pumpRunningMiningScreen(tester);
       miningApi.epicBonusResult = MiningSession(
         id: 88,
@@ -319,7 +325,41 @@ void main() {
         startedAt: miningApi.activeSessionToReturn!.startedAt,
         endsAt: miningApi.activeSessionToReturn!.endsAt,
         status: 'running',
+        epicBonusApplied: false,
+        epicBonusVideosWatched: 1,
+        speedupUsed: false,
+      );
+
+      expect(find.text('Assistir vídeo 1/2'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('epic_bonus_button')));
+      await tester.pump();
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(miningApi.epicBonusCallCount, 1);
+      // Ainda não liberou -- só o primeiro dos 2 vídeos foi assistido.
+      expect(find.byKey(const Key('epic_bonus_unlocked_badge')), findsNothing);
+      expect(find.byKey(const Key('epic_bonus_button')), findsOneWidget);
+      expect(find.text('Assistir vídeo 2/2'), findsOneWidget);
+    });
+
+    testWidgets('watching the second epic bonus video unlocks it and hides the button', (tester) async {
+      final miningApi = await pumpRunningMiningScreen(
+        tester,
+        epicBonusVideosWatched: 1, // já assistiu o primeiro vídeo antes
+      );
+      miningApi.epicBonusResult = MiningSession(
+        id: 88,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 3,
+        startedAt: miningApi.activeSessionToReturn!.startedAt,
+        endsAt: miningApi.activeSessionToReturn!.endsAt,
+        status: 'running',
         epicBonusApplied: true,
+        epicBonusVideosWatched: 2,
         speedupUsed: false,
       );
 
@@ -331,6 +371,8 @@ void main() {
 
       expect(miningApi.epicBonusCallCount, 1);
       expect(find.byKey(const Key('epic_bonus_button')), findsNothing);
+      expect(find.byKey(const Key('epic_bonus_unlocked_badge')), findsOneWidget);
+      expect(find.text('Cubo Épico liberado!'), findsOneWidget);
       // O botão de acelerar continua disponível -- são bônus independentes.
       expect(find.byKey(const Key('speedup_button')), findsOneWidget);
     });
@@ -346,6 +388,7 @@ void main() {
         endsAt: DateTime.now().add(const Duration(minutes: 30)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: true,
       );
 
@@ -419,6 +462,7 @@ void main() {
         endsAt: DateTime.now().add(const Duration(minutes: 15)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: true,
       );
 
@@ -438,6 +482,18 @@ void main() {
       // antes, calculado contra o ends_at antigo). Correto: ~90/105 ≈ 0.857.
       expect(progressAfter, closeTo(90 / 105, 0.02));
       expect(progressAfter, isNot(closeTo(progressBefore, 0.01)));
+    });
+
+    testWidgets('shows "MINERANDO" normally and "ÉPICO MINERANDO" once the epic bonus is unlocked', (tester) async {
+      await pumpRunningMiningScreen(tester);
+      expect(find.text('MINERANDO'), findsOneWidget);
+      expect(find.text('ÉPICO MINERANDO'), findsNothing);
+    });
+
+    testWidgets('shows "ÉPICO MINERANDO" when the session is restored with the epic bonus already applied', (tester) async {
+      await pumpRunningMiningScreen(tester, epicBonusApplied: true);
+      expect(find.text('ÉPICO MINERANDO'), findsOneWidget);
+      expect(find.text('MINERANDO'), findsNothing);
     });
   });
 }

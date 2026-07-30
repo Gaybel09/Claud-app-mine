@@ -20,6 +20,11 @@ class MiningSessionRead(BaseModel):
     ends_at: datetime
     status: str
     epic_bonus_applied: bool
+    # 0, 1 ou 2 -- quantos dos EPIC_BONUS_VIDEOS_REQUIRED vídeos do Cubo
+    # Épico já foram assistidos (ver MiningSession.epic_bonus_videos_watched
+    # em app/models/mining_session.py). epic_bonus_applied só vira true
+    # quando este campo chega em 2.
+    epic_bonus_videos_watched: int
     speedup_used: bool
 
 

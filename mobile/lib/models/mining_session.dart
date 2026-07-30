@@ -1,3 +1,7 @@
+/// Quantos vídeos o fluxo de desbloqueio do Cubo Épico exige -- ver
+/// EPIC_BONUS_VIDEOS_REQUIRED no backend (app/modules/mining/service.py).
+const epicBonusVideosRequired = 2;
+
 class MiningSession {
   const MiningSession({
     required this.id,
@@ -8,6 +12,7 @@ class MiningSession {
     required this.endsAt,
     required this.status,
     required this.epicBonusApplied,
+    required this.epicBonusVideosWatched,
     required this.speedupUsed,
   });
 
@@ -18,10 +23,15 @@ class MiningSession {
   final DateTime startedAt;
   final DateTime endsAt;
   final String status;
-  // Cubo Épico (bônus de +25% na coleta) e Acelerar (reduz o tempo restante
-  // pela metade) -- cada um só pode ser usado 1x por sessão; a tela do cubo
-  // esconde o botão correspondente assim que o respectivo campo vira true.
+  // Cubo Épico -- fluxo de desbloqueio: exige epicBonusVideosRequired (2)
+  // vídeos distintos assistidos (epicBonusVideosWatched conta o progresso,
+  // 0/1/2) antes de epicBonusApplied virar true e a sessão passar a pagar
+  // +25% na coleta. Acelerar (speedupUsed) reduz o tempo restante pela
+  // metade -- só 1 vídeo, sem fluxo de progresso. Ambos só podem ser
+  // usados 1x por sessão; a tela do cubo esconde o botão/painel
+  // correspondente assim que o respectivo campo indica "completo".
   final bool epicBonusApplied;
+  final int epicBonusVideosWatched;
   final bool speedupUsed;
 
   factory MiningSession.fromJson(Map<String, dynamic> json) {
@@ -34,6 +44,7 @@ class MiningSession {
       endsAt: DateTime.parse(json['ends_at'] as String),
       status: json['status'] as String,
       epicBonusApplied: json['epic_bonus_applied'] as bool,
+      epicBonusVideosWatched: json['epic_bonus_videos_watched'] as int,
       speedupUsed: json['speedup_used'] as bool,
     );
   }

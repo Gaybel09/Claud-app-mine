@@ -11,4 +11,10 @@ class AppColors {
   static const mutedWhite = Color(0xFFB8B8C8);
   static const success = Color(0xFF3DDC97);
   static const danger = Color(0xFFFF5C7A);
+  // Cubo Épico -- roxo/magenta bem mais saturado que neonPurple, usado só
+  // enquanto o bônus estiver ativo numa sessão (CubeVisual(epic: true) e o
+  // painel/botão do Cubo Épico), pra destacar visualmente do roxo "normal"
+  // do gradiente padrão do app.
+  static const epicMagenta = Color(0xFFE026FF);
+  static const epicGold = Color(0xFFFFD54A);
 }

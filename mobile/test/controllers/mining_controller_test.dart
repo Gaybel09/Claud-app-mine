@@ -108,6 +108,7 @@ void main() {
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 999;
@@ -132,6 +133,7 @@ void main() {
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 0; // status já vem ready_to_collect=true
@@ -155,6 +157,7 @@ void main() {
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: false,
       );
 
@@ -180,6 +183,7 @@ void main() {
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: false,
       );
 
@@ -241,6 +245,7 @@ void main() {
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: false,
       );
       miningApi.statusNotReadyCount = 2;
@@ -271,6 +276,7 @@ void main() {
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: false,
       );
       miningApi.throwOnCollect = const ApiException(
@@ -311,6 +317,7 @@ void main() {
         endsAt: startedAt.add(const Duration(hours: 2)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: false,
       );
       // Nunca reporta ready_to_collect -- sem isso, o poll de status
@@ -333,6 +340,7 @@ void main() {
         endsAt: controller.session!.endsAt,
         status: 'running',
         epicBonusApplied: true,
+        epicBonusVideosWatched: 2,
         speedupUsed: false,
       );
       miningApi.epicBonusResult = updated;
@@ -344,6 +352,36 @@ void main() {
       expect(miningApi.epicBonusCallCount, 1);
       expect(miningApi.lastEpicBonusSessionId, 55);
       expect(rewardedAdService.loadAndShowCallCount, 2); // 1 pra iniciar + 1 pro bônus
+    });
+
+    test('useEpicBonus reflects progress (1/2) without applying after only one video', () async {
+      await startMiningFor(controller);
+      final updated = MiningSession(
+        id: 55,
+        userId: 1,
+        cubeId: 1,
+        adViewId: 1,
+        startedAt: controller.session!.startedAt,
+        endsAt: controller.session!.endsAt,
+        status: 'running',
+        epicBonusApplied: false,
+        epicBonusVideosWatched: 1,
+        speedupUsed: false,
+      );
+      miningApi.epicBonusResult = updated;
+
+      await controller.useEpicBonus();
+      await _waitUntil(() => controller.epicBonusStage == BonusActionStage.idle);
+
+      expect(controller.session!.epicBonusVideosWatched, 1);
+      expect(controller.session!.epicBonusApplied, isFalse);
+
+      // Não é o "já aplicado" que bloqueia uma segunda chamada -- com só 1
+      // vídeo assistido, tocar de novo deve chamar a API normalmente pro
+      // segundo vídeo.
+      await controller.useEpicBonus();
+      await _waitUntil(() => miningApi.epicBonusCallCount >= 2);
+      expect(miningApi.epicBonusCallCount, 2);
     });
 
     test('useEpicBonus does not call the API when the ad is not watched to the end', () async {
@@ -368,6 +406,7 @@ void main() {
         endsAt: controller.session!.endsAt,
         status: 'running',
         epicBonusApplied: true,
+        epicBonusVideosWatched: 2,
         speedupUsed: false,
       );
 
@@ -404,6 +443,7 @@ void main() {
         endsAt: DateTime.now().add(const Duration(minutes: 30)),
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: true,
       );
       miningApi.speedupResult = updated;
@@ -426,6 +466,7 @@ void main() {
         endsAt: controller.session!.endsAt,
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: true,
       );
 
@@ -446,6 +487,7 @@ void main() {
         endsAt: controller.session!.endsAt,
         status: 'running',
         epicBonusApplied: false,
+        epicBonusVideosWatched: 0,
         speedupUsed: true,
       );
 

@@ -89,22 +89,73 @@ def _start_session(client: TestClient, user_id: int) -> tuple[int, int]:
     return response.json()["id"], ad_view_id
 
 
-# --- POST /mining/epic-bonus ---------------------------------------------
+# --- POST /mining/epic-bonus (fluxo de 2 vídeos) --------------------------
+
+
+def _watch_epic_bonus_video(client: TestClient, user_id: int, session_id: int):
+    ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
+    return client.post(
+        "/mining/epic-bonus",
+        json={"session_id": session_id, "ad_view_id": ad_view_id},
+        headers=_auth_header(),
+    )
+
+
+def test_epic_bonus_first_video_only_advances_progress_without_applying(client: TestClient, monkeypatch):
+    user_id = _register_user(client, monkeypatch, "uid-epic-1", "epic-1@example.com")
+    session_id, _ = _start_session(client, user_id)
+
+    response = _watch_epic_bonus_video(client, user_id, session_id)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["epic_bonus_videos_watched"] == 1
+    assert body["epic_bonus_applied"] is False
+
+
+def test_epic_bonus_second_video_applies_the_bonus(client: TestClient, monkeypatch):
+    user_id = _register_user(client, monkeypatch, "uid-epic-2", "epic-2@example.com")
+    session_id, _ = _start_session(client, user_id)
+
+    _watch_epic_bonus_video(client, user_id, session_id)
+    response = _watch_epic_bonus_video(client, user_id, session_id)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["epic_bonus_videos_watched"] == 2
+    assert body["epic_bonus_applied"] is True
+
+
+def test_epic_bonus_with_only_one_video_pays_the_full_amount_not_the_bonus(
+    client: TestClient, monkeypatch
+):
+    """Com só 1 dos 2 vídeos assistidos, o bônus ainda não foi destravado
+    (epic_bonus_applied continua false) -- a coleta paga o valor cheio
+    (0.30), não o valor com +25% (0.37)."""
+    user_id = _register_user(client, monkeypatch, "uid-epic-3", "epic-3@example.com")
+    _top_up_reward_fund(Decimal("100.00"))
+    session_id, _ = _start_session(client, user_id)
+
+    video = _watch_epic_bonus_video(client, user_id, session_id)
+    assert video.json()["epic_bonus_applied"] is False
+
+    _expire_session_now(session_id)
+    collect_response = client.post(
+        "/mining/collect",
+        json={"session_id": session_id},
+        headers={**_auth_header(), "Idempotency-Key": "epic-3-one-video"},
+    )
+    assert collect_response.status_code == 200
+    assert Decimal(str(collect_response.json()["reward_amount"])) == Decimal("0.30")
 
 
 def test_epic_bonus_applies_1_25x_multiplier_on_collect(client: TestClient, monkeypatch):
-    user_id = _register_user(client, monkeypatch, "uid-epic-1", "epic-1@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-epic-4", "epic-4@example.com")
     _top_up_reward_fund(Decimal("100.00"))
     session_id, _ = _start_session(client, user_id)
-    bonus_ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
 
-    response = client.post(
-        "/mining/epic-bonus",
-        json={"session_id": session_id, "ad_view_id": bonus_ad_view_id},
-        headers=_auth_header(),
-    )
-    assert response.status_code == 200
-    assert response.json()["epic_bonus_applied"] is True
+    _watch_epic_bonus_video(client, user_id, session_id)
+    second = _watch_epic_bonus_video(client, user_id, session_id)
+    assert second.json()["epic_bonus_applied"] is True
 
     _expire_session_now(session_id)
     collect_response = client.post(
@@ -135,31 +186,44 @@ def test_epic_bonus_not_applied_pays_normal_amount(client: TestClient, monkeypat
     assert Decimal(str(collect_response.json()["reward_amount"])) == Decimal("0.30")
 
 
-def test_epic_bonus_rejects_second_use_on_same_session(client: TestClient, monkeypatch):
-    user_id = _register_user(client, monkeypatch, "uid-epic-2", "epic-2@example.com")
+def test_epic_bonus_rejects_third_video_once_already_applied(client: TestClient, monkeypatch):
+    user_id = _register_user(client, monkeypatch, "uid-epic-5", "epic-5@example.com")
     session_id, _ = _start_session(client, user_id)
-    first_bonus_ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
-    second_bonus_ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
+
+    _watch_epic_bonus_video(client, user_id, session_id)
+    second = _watch_epic_bonus_video(client, user_id, session_id)
+    assert second.status_code == 200
+
+    third = _watch_epic_bonus_video(client, user_id, session_id)
+    assert third.status_code == 409
+
+
+def test_epic_bonus_rejects_reusing_the_same_ad_view_for_both_slots(client: TestClient, monkeypatch):
+    """Sem essa checagem, um único anúncio poderia preencher os dois slots
+    sozinho -- o segundo vídeo precisa ser um ad_view DIFERENTE do primeiro."""
+    user_id = _register_user(client, monkeypatch, "uid-epic-6", "epic-6@example.com")
+    session_id, _ = _start_session(client, user_id)
+    ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
 
     first = client.post(
         "/mining/epic-bonus",
-        json={"session_id": session_id, "ad_view_id": first_bonus_ad_view_id},
+        json={"session_id": session_id, "ad_view_id": ad_view_id},
         headers=_auth_header(),
     )
     assert first.status_code == 200
 
     second = client.post(
         "/mining/epic-bonus",
-        json={"session_id": session_id, "ad_view_id": second_bonus_ad_view_id},
+        json={"session_id": session_id, "ad_view_id": ad_view_id},
         headers=_auth_header(),
     )
-    assert second.status_code == 409
+    assert second.status_code == 400
 
 
 def test_epic_bonus_rejects_reusing_the_ad_view_that_started_the_session(client: TestClient, monkeypatch):
     """Sem essa checagem, um único anúncio (o que já liberou /mining/start)
-    poderia "pagar" o bônus de novo de graça, sem assistir nada a mais."""
-    user_id = _register_user(client, monkeypatch, "uid-epic-3", "epic-3@example.com")
+    poderia "pagar" parte do bônus de novo, sem assistir nada a mais."""
+    user_id = _register_user(client, monkeypatch, "uid-epic-7", "epic-7@example.com")
     session_id, start_ad_view_id = _start_session(client, user_id)
 
     response = client.post(
@@ -171,7 +235,7 @@ def test_epic_bonus_rejects_reusing_the_ad_view_that_started_the_session(client:
 
 
 def test_epic_bonus_requires_confirmed_ad_view(client: TestClient, monkeypatch):
-    user_id = _register_user(client, monkeypatch, "uid-epic-4", "epic-4@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-epic-8", "epic-8@example.com")
     session_id, _ = _start_session(client, user_id)
     pending_ad_view_id = _create_ad_view(user_id, AdViewStatus.PENDING)
 
@@ -184,13 +248,13 @@ def test_epic_bonus_requires_confirmed_ad_view(client: TestClient, monkeypatch):
 
 
 def test_epic_bonus_rejects_ad_view_belonging_to_another_user(client: TestClient, monkeypatch):
-    user_id = _register_user(client, monkeypatch, "uid-epic-5", "epic-5@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-epic-9", "epic-9@example.com")
     session_id, _ = _start_session(client, user_id)
 
-    other_user_id = _register_user(client, monkeypatch, "uid-epic-5-other", "epic-5-other@example.com")
+    other_user_id = _register_user(client, monkeypatch, "uid-epic-9-other", "epic-9-other@example.com")
     other_ad_view_id = _create_ad_view(other_user_id, AdViewStatus.CONFIRMED)
 
-    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-epic-5", "epic-5@example.com"))
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-epic-9", "epic-9@example.com"))
     response = client.post(
         "/mining/epic-bonus",
         json={"session_id": session_id, "ad_view_id": other_ad_view_id},
@@ -200,27 +264,22 @@ def test_epic_bonus_rejects_ad_view_belonging_to_another_user(client: TestClient
 
 
 def test_epic_bonus_rejects_already_collected_session(client: TestClient, monkeypatch):
-    user_id = _register_user(client, monkeypatch, "uid-epic-6", "epic-6@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-epic-10", "epic-10@example.com")
     _top_up_reward_fund(Decimal("100.00"))
     session_id, _ = _start_session(client, user_id)
     _expire_session_now(session_id)
     client.post(
         "/mining/collect",
         json={"session_id": session_id},
-        headers={**_auth_header(), "Idempotency-Key": "epic-6-collect"},
+        headers={**_auth_header(), "Idempotency-Key": "epic-10-collect"},
     )
 
-    bonus_ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
-    response = client.post(
-        "/mining/epic-bonus",
-        json={"session_id": session_id, "ad_view_id": bonus_ad_view_id},
-        headers=_auth_header(),
-    )
+    response = _watch_epic_bonus_video(client, user_id, session_id)
     assert response.status_code == 409
 
 
 def test_epic_bonus_returns_404_for_nonexistent_session(client: TestClient, monkeypatch):
-    user_id = _register_user(client, monkeypatch, "uid-epic-7", "epic-7@example.com")
+    user_id = _register_user(client, monkeypatch, "uid-epic-11", "epic-11@example.com")
     ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
 
     response = client.post(
@@ -232,13 +291,13 @@ def test_epic_bonus_returns_404_for_nonexistent_session(client: TestClient, monk
 
 
 def test_epic_bonus_does_not_leak_across_users(client: TestClient, monkeypatch):
-    owner_id = _register_user(client, monkeypatch, "uid-epic-8-owner", "epic-8-owner@example.com")
+    owner_id = _register_user(client, monkeypatch, "uid-epic-12-owner", "epic-12-owner@example.com")
     session_id, _ = _start_session(client, owner_id)
 
-    attacker_id = _register_user(client, monkeypatch, "uid-epic-8-attacker", "epic-8-attacker@example.com")
+    attacker_id = _register_user(client, monkeypatch, "uid-epic-12-attacker", "epic-12-attacker@example.com")
     attacker_ad_view_id = _create_ad_view(attacker_id, AdViewStatus.CONFIRMED)
 
-    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-epic-8-attacker", "epic-8-attacker@example.com"))
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-epic-12-attacker", "epic-12-attacker@example.com"))
     response = client.post(
         "/mining/epic-bonus",
         json={"session_id": session_id, "ad_view_id": attacker_ad_view_id},
@@ -394,13 +453,10 @@ def test_both_bonuses_can_be_used_in_the_same_session(client: TestClient, monkey
     _top_up_reward_fund(Decimal("100.00"))
     session_id, _ = _start_session(client, user_id)
 
-    epic_ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
-    epic_response = client.post(
-        "/mining/epic-bonus",
-        json={"session_id": session_id, "ad_view_id": epic_ad_view_id},
-        headers=_auth_header(),
-    )
+    _watch_epic_bonus_video(client, user_id, session_id)
+    epic_response = _watch_epic_bonus_video(client, user_id, session_id)
     assert epic_response.status_code == 200
+    assert epic_response.json()["epic_bonus_applied"] is True
 
     speedup_ad_view_id = _create_ad_view(user_id, AdViewStatus.CONFIRMED)
     speedup_response = client.post(

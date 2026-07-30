@@ -141,7 +141,10 @@ class _CubeScreenState extends State<CubeScreen> {
           onSpeedup: controller.useSpeedup,
         );
       case CubeCycleStage.readyToCollect:
-        return _ReadyState(onCollect: controller.collect);
+        return _ReadyState(
+          onCollect: controller.collect,
+          epic: controller.session?.epicBonusApplied ?? false,
+        );
       case CubeCycleStage.collecting:
         return const _MessageState(message: 'Coletando recompensa...', showSpinner: true);
       case CubeCycleStage.collected:
@@ -237,28 +240,30 @@ class _MiningState extends StatelessWidget {
     final remainingText = remaining.isNegative
         ? 'Finalizando...'
         : '${remaining.inHours}h ${remaining.inMinutes.remainder(60)}min restantes';
+    final isEpic = session.epicBonusApplied;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const CubeVisual(type: 'minerando', glowing: true),
+        CubeVisual(
+          type: isEpic ? 'épico minerando' : 'minerando',
+          glowing: true,
+          epic: isEpic,
+        ),
         const SizedBox(height: 32),
         NeonProgressBar(progress: progress),
         const SizedBox(height: 12),
         Text(remainingText, style: Theme.of(context).textTheme.bodyMedium),
         const SizedBox(height: 24),
-        _BonusButton(
-          buttonKey: const Key('epic_bonus_button'),
-          label: 'Cubo Épico: assista mais um anúncio pra ganhar um bônus',
-          visible: !session.epicBonusApplied,
+        _EpicBonusPanel(
+          videosWatched: session.epicBonusVideosWatched,
+          applied: session.epicBonusApplied,
           stage: epicBonusStage,
           errorMessage: epicBonusError,
-          onPressed: onEpicBonus,
+          onWatchVideo: onEpicBonus,
         ),
-        const SizedBox(height: 12),
-        _BonusButton(
-          buttonKey: const Key('speedup_button'),
-          label: 'Acelerar (2x): assista um anúncio',
+        const SizedBox(height: 16),
+        _SpeedupButton(
           visible: !session.speedupUsed,
           stage: speedupStage,
           errorMessage: speedupError,
@@ -269,18 +274,217 @@ class _MiningState extends StatelessWidget {
   }
 }
 
-class _BonusButton extends StatelessWidget {
-  const _BonusButton({
+/// Botão de ação "chamativo" coerente com o tema neon do app -- gradiente,
+/// ícone e brilho -- reaproveitado pelo Cubo Épico e pelo Acelerar em vez
+/// de um OutlinedButton genérico.
+class _GlowActionButton extends StatelessWidget {
+  const _GlowActionButton({
     required this.buttonKey,
+    required this.icon,
     required this.label,
+    required this.gradientColors,
+    required this.glowColor,
+    required this.busy,
+    required this.onPressed,
+  });
+
+  final Key buttonKey;
+  final IconData icon;
+  final String label;
+  final List<Color> gradientColors;
+  final Color glowColor;
+  final bool busy;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        key: buttonKey,
+        borderRadius: BorderRadius.circular(16),
+        onTap: busy ? null : onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(colors: gradientColors),
+            boxShadow: busy
+                ? const []
+                : [BoxShadow(color: glowColor.withValues(alpha: 0.5), blurRadius: 22, spreadRadius: 1)],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (busy)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                )
+              else
+                Icon(icon, color: Colors.black, size: 20),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Cubo Épico -- fluxo de desbloqueio: enquanto epicBonusVideosRequired (2)
+/// vídeos não forem assistidos, mostra a mensagem + indicador de progresso
+/// (bolinhas) + botão pra assistir o próximo. Depois dos dois, mostra o
+/// badge de "liberado" (ver _EpicBonusUnlockedBadge) e some com o botão.
+class _EpicBonusPanel extends StatelessWidget {
+  const _EpicBonusPanel({
+    required this.videosWatched,
+    required this.applied,
+    required this.stage,
+    required this.errorMessage,
+    required this.onWatchVideo,
+  });
+
+  final int videosWatched;
+  final bool applied;
+  final BonusActionStage stage;
+  final String? errorMessage;
+  final VoidCallback onWatchVideo;
+
+  @override
+  Widget build(BuildContext context) {
+    if (applied) {
+      return const _EpicBonusUnlockedBadge();
+    }
+
+    final busy = stage == BonusActionStage.watchingAd || stage == BonusActionStage.waitingConfirmation;
+    final nextVideoNumber = videosWatched + 1;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Assista $epicBonusVideosRequired vídeos para desbloquear o Cubo Épico',
+          key: const Key('epic_bonus_progress_text'),
+          textAlign: TextAlign.center,
+          style: Theme.of(context)
+              .textTheme
+              .bodyMedium
+              ?.copyWith(color: AppColors.epicMagenta, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        _EpicBonusDots(videosWatched: videosWatched),
+        const SizedBox(height: 12),
+        _GlowActionButton(
+          buttonKey: const Key('epic_bonus_button'),
+          icon: Icons.auto_awesome,
+          label: 'Assistir vídeo $nextVideoNumber/$epicBonusVideosRequired',
+          gradientColors: const [AppColors.epicMagenta, AppColors.neonPurple],
+          glowColor: AppColors.epicMagenta,
+          busy: busy,
+          onPressed: onWatchVideo,
+        ),
+        if (stage == BonusActionStage.error && errorMessage != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              errorMessage!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _EpicBonusDots extends StatelessWidget {
+  const _EpicBonusDots({required this.videosWatched});
+
+  final int videosWatched;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      key: const Key('epic_bonus_dots'),
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(epicBonusVideosRequired, (index) {
+        final filled = index < videosWatched;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Icon(
+            filled ? Icons.circle : Icons.circle_outlined,
+            size: 14,
+            color: filled ? AppColors.epicMagenta : AppColors.mutedWhite,
+          ),
+        );
+      }),
+    );
+  }
+}
+
+class _EpicBonusUnlockedBadge extends StatelessWidget {
+  const _EpicBonusUnlockedBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      key: const Key('epic_bonus_unlocked_badge'),
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOut,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.scale(scale: 0.85 + 0.15 * value, child: child),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          gradient: const LinearGradient(colors: [AppColors.epicMagenta, AppColors.epicGold]),
+          boxShadow: [
+            BoxShadow(color: AppColors.epicMagenta.withValues(alpha: 0.5), blurRadius: 24, spreadRadius: 2),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.auto_awesome, color: Colors.black, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              'Cubo Épico liberado!',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(color: Colors.black, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SpeedupButton extends StatelessWidget {
+  const _SpeedupButton({
     required this.visible,
     required this.stage,
     required this.errorMessage,
     required this.onPressed,
   });
 
-  final Key buttonKey;
-  final String label;
   final bool visible;
   final BonusActionStage stage;
   final String? errorMessage;
@@ -290,22 +494,19 @@ class _BonusButton extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!visible) return const SizedBox.shrink();
 
-    final isBusy =
-        stage == BonusActionStage.watchingAd || stage == BonusActionStage.waitingConfirmation;
+    final busy = stage == BonusActionStage.watchingAd || stage == BonusActionStage.waitingConfirmation;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        OutlinedButton(
-          key: buttonKey,
-          onPressed: isBusy ? null : onPressed,
-          child: isBusy
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(label, textAlign: TextAlign.center),
+        _GlowActionButton(
+          buttonKey: const Key('speedup_button'),
+          icon: Icons.bolt,
+          label: 'Acelerar (2x): assista um anúncio',
+          gradientColors: const [AppColors.neonBlue, AppColors.neonPurple],
+          glowColor: AppColors.neonBlue,
+          busy: busy,
+          onPressed: onPressed,
         ),
         if (stage == BonusActionStage.error && errorMessage != null)
           Padding(
@@ -322,16 +523,17 @@ class _BonusButton extends StatelessWidget {
 }
 
 class _ReadyState extends StatelessWidget {
-  const _ReadyState({required this.onCollect});
+  const _ReadyState({required this.onCollect, this.epic = false});
 
   final VoidCallback onCollect;
+  final bool epic;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const CubeVisual(type: 'pronto', glowing: true),
+        CubeVisual(type: epic ? 'épico pronto' : 'pronto', glowing: true, epic: epic),
         const SizedBox(height: 32),
         Text(
           'Seu cubo está pronto para coleta!',

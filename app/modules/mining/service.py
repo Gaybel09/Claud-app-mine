@@ -31,6 +31,10 @@ REWARD_FUND_SAFETY_MARGIN = Decimal("0.9")
 # sessão.
 EPIC_BONUS_MULTIPLIER = Decimal("1.25")
 
+# Fluxo de desbloqueio: precisa de 2 RewardedAds distintos (não 1) antes de
+# epic_bonus_applied virar true -- ver apply_epic_bonus.
+EPIC_BONUS_VIDEOS_REQUIRED = 2
+
 # Acelerar (2x): reduz o tempo restante pela metade -- não "acelera o
 # clock" de verdade, só reagenda ends_at pra now() + metade do que faltava.
 # float, não Decimal -- timedelta só aceita multiplicar por int/float.
@@ -166,7 +170,8 @@ def _consume_bonus_ad_view(db: Session, user_id: int, ad_view_id: int) -> None:
     confirmado (mesmo callback assíncrono do SDK usado por
     start_mining_session -- nunca só o aviso do cliente), e (3) nunca ter
     sido consumido antes, nem pra iniciar uma sessão (MiningSession.ad_view_id)
-    nem pro outro bônus (epic_bonus_ad_view_id/speedup_ad_view_id) -- sem
+    nem pro outro slot do mesmo bônus nem pro outro bônus
+    (epic_bonus_ad_view_1_id/epic_bonus_ad_view_2_id/speedup_ad_view_id) -- sem
     isso, um único anúncio assistido poderia "pagar" duas vezes.
 
     PENDÊNCIA CONHECIDA (baixa prioridade, aceita por ora -- revisar mais
@@ -196,7 +201,8 @@ def _consume_bonus_ad_view(db: Session, user_id: int, ad_view_id: int) -> None:
         .filter(
             or_(
                 MiningSession.ad_view_id == ad_view_id,
-                MiningSession.epic_bonus_ad_view_id == ad_view_id,
+                MiningSession.epic_bonus_ad_view_1_id == ad_view_id,
+                MiningSession.epic_bonus_ad_view_2_id == ad_view_id,
                 MiningSession.speedup_ad_view_id == ad_view_id,
             )
         )
@@ -207,18 +213,24 @@ def _consume_bonus_ad_view(db: Session, user_id: int, ad_view_id: int) -> None:
 
 
 def apply_epic_bonus(db: Session, user_id: int, session_id: int, ad_view_id: int) -> MiningSession:
-    """Cubo Épico (anúncio bônus, seção 7): usuário assiste um segundo
-    RewardedAd enquanto uma mineração normal já está rodando -- essa sessão
-    passa a pagar EPIC_BONUS_MULTIPLIER (1.25x) o value_per_session vigente
-    no momento da coleta, em vez do valor cheio. Só aplica o FLAG aqui; o
+    """Cubo Épico (anúncio bônus, seção 7) -- fluxo de desbloqueio: exige 2
+    RewardedAds distintos (EPIC_BONUS_VIDEOS_REQUIRED) enquanto uma
+    mineração normal já está rodando antes da sessão passar a pagar
+    EPIC_BONUS_MULTIPLIER (1.25x) o value_per_session vigente no momento da
+    coleta. Esta função é chamada uma vez POR VÍDEO -- a primeira chamada
+    preenche epic_bonus_ad_view_1_id (session.epic_bonus_videos_watched
+    vira 1, ainda não aplica nada); a segunda preenche
+    epic_bonus_ad_view_2_id e só aí marca epic_bonus_applied=true. O
     multiplicador de verdade só é lido em collect_mining_session, no
-    momento da coleta (o valor por sessão pode mudar entre o clique no
-    bônus e a coleta -- 1x/dia, ver reward.service).
+    momento da coleta (o valor por sessão pode mudar entre o desbloqueio e
+    a coleta -- 1x/dia, ver reward.service).
 
     Levanta SessionNotFoundError, SessionNotReadyError (sessão não está
-    RUNNING -- já coletada/expirada), EpicBonusAlreadyUsedError (só 1x por
-    sessão), AdViewNotConfirmedError ou AdViewAlreadyUsedError (ver
-    _consume_bonus_ad_view)."""
+    RUNNING -- já coletada/expirada), EpicBonusAlreadyUsedError (já
+    destravado -- os dois vídeos já foram assistidos), AdViewNotConfirmedError
+    ou AdViewAlreadyUsedError (ver _consume_bonus_ad_view -- inclui usar o
+    MESMO ad_view pros dois slots, já que o slot 1 já preenchido conta como
+    "usado" pra essa checagem)."""
     session = (
         db.query(MiningSession)
         .filter(MiningSession.id == session_id, MiningSession.user_id == user_id)
@@ -234,8 +246,12 @@ def apply_epic_bonus(db: Session, user_id: int, session_id: int, ad_view_id: int
 
     _consume_bonus_ad_view(db, user_id, ad_view_id)
 
-    session.epic_bonus_applied = True
-    session.epic_bonus_ad_view_id = ad_view_id
+    if session.epic_bonus_ad_view_1_id is None:
+        session.epic_bonus_ad_view_1_id = ad_view_id
+    else:
+        session.epic_bonus_ad_view_2_id = ad_view_id
+        session.epic_bonus_applied = True
+
     db.commit()
     db.refresh(session)
     return session

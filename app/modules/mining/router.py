@@ -56,9 +56,12 @@ def epic_bonus(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Cubo Épico -- assistir um segundo RewardedAd enquanto a mineração
-    roda para essa sessão pagar EPIC_BONUS_MULTIPLIER (1.25x) na coleta.
-    Ver docstring completa de service.apply_epic_bonus."""
+    """Cubo Épico -- chamado uma vez POR VÍDEO (2 RewardedAds distintos,
+    não 1) enquanto a mineração roda, pra essa sessão pagar
+    EPIC_BONUS_MULTIPLIER (1.25x) na coleta assim que o segundo vídeo for
+    confirmado. A resposta sempre traz epic_bonus_videos_watched (0/1/2) e
+    epic_bonus_applied (só true depois do segundo). Ver docstring completa
+    de service.apply_epic_bonus."""
     try:
         session = service.apply_epic_bonus(db, current_user.id, payload.session_id, payload.ad_view_id)
     except service.SessionNotFoundError:
