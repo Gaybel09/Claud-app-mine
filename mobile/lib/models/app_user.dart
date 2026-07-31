@@ -7,6 +7,9 @@ class AppUser {
     required this.kycStatus,
     required this.createdAt,
     required this.isBlocked,
+    this.nickname,
+    this.countryCode,
+    this.stateCode,
   });
 
   final int id;
@@ -17,6 +20,12 @@ class AppUser {
   final DateTime createdAt;
   final bool isBlocked;
 
+  /// Exibido no ranking (ver RankingScreen) no lugar do email -- null até o
+  /// usuário definir um via PATCH /auth/nickname.
+  final String? nickname;
+  final String? countryCode;
+  final String? stateCode;
+
   factory AppUser.fromJson(Map<String, dynamic> json) {
     return AppUser(
       id: json['id'] as int,
@@ -26,6 +35,9 @@ class AppUser {
       kycStatus: json['kyc_status'] as String,
       createdAt: DateTime.parse(json['created_at'] as String),
       isBlocked: json['is_blocked'] as bool,
+      nickname: json['nickname'] as String?,
+      countryCode: json['country_code'] as String?,
+      stateCode: json['state_code'] as String?,
     );
   }
 }

@@ -7,16 +7,25 @@ import 'package:cubemine_pix/models/app_user.dart';
 import 'package:cubemine_pix/models/cube.dart';
 import 'package:cubemine_pix/models/ledger_entry.dart';
 import 'package:cubemine_pix/models/mining_session.dart';
+import 'package:cubemine_pix/models/ranking.dart';
 import 'package:cubemine_pix/models/withdrawal.dart';
 import 'package:cubemine_pix/services/ads_api.dart';
 import 'package:cubemine_pix/services/auth_api.dart';
 import 'package:cubemine_pix/services/cubes_api.dart';
 import 'package:cubemine_pix/services/mining_api.dart';
 import 'package:cubemine_pix/services/pix_api.dart';
+import 'package:cubemine_pix/services/ranking_api.dart';
 import 'package:cubemine_pix/services/rewarded_ad_service.dart';
 import 'package:cubemine_pix/services/wallet_api.dart';
 
-AppUser fakeAppUser({String email = 'user@example.com', String? pixKey}) => AppUser(
+AppUser fakeAppUser({
+  String email = 'user@example.com',
+  String? pixKey,
+  String? nickname,
+  String? countryCode,
+  String? stateCode,
+}) =>
+    AppUser(
       id: 1,
       email: email,
       phone: null,
@@ -24,6 +33,9 @@ AppUser fakeAppUser({String email = 'user@example.com', String? pixKey}) => AppU
       kycStatus: 'pending',
       createdAt: DateTime.now(),
       isBlocked: false,
+      nickname: nickname,
+      countryCode: countryCode,
+      stateCode: stateCode,
     );
 
 class FakeAuthService implements AuthService {
@@ -77,11 +89,16 @@ class FakeAuthApi implements AuthApi {
   Object? throwOnLogin;
   Object? throwOnRegister;
 
+  String? nicknameToReturn;
+  int updateNicknameCallCount = 0;
+  String? lastUpdatedNickname;
+  Object? throwOnUpdateNickname;
+
   @override
   Future<AppUser> login() async {
     loginCalled = true;
     if (throwOnLogin != null) throw throwOnLogin!;
-    return fakeAppUser(pixKey: pixKeyToReturn);
+    return fakeAppUser(pixKey: pixKeyToReturn, nickname: nicknameToReturn);
   }
 
   @override
@@ -90,6 +107,32 @@ class FakeAuthApi implements AuthApi {
     registeredPhone = phone;
     if (throwOnRegister != null) throw throwOnRegister!;
     return fakeAppUser();
+  }
+
+  @override
+  Future<AppUser> updateNickname(String nickname) async {
+    updateNicknameCallCount++;
+    lastUpdatedNickname = nickname;
+    if (throwOnUpdateNickname != null) throw throwOnUpdateNickname!;
+    nicknameToReturn = nickname;
+    return fakeAppUser(pixKey: pixKeyToReturn, nickname: nickname);
+  }
+}
+
+class FakeRankingApi implements RankingApi {
+  RankingResult? resultToReturn;
+  Object? throwOnGetRanking;
+  int getRankingCallCount = 0;
+
+  @override
+  Future<RankingResult> getRanking() async {
+    getRankingCallCount++;
+    if (throwOnGetRanking != null) throw throwOnGetRanking!;
+    return resultToReturn ??
+        const RankingResult(
+          general: ScopeRanking(top: [], myRank: null, myTotal: 0),
+          regional: null,
+        );
   }
 }
 

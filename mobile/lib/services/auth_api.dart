@@ -4,6 +4,7 @@ import '../models/app_user.dart';
 abstract class AuthApi {
   Future<AppUser> register({String? phone, String? pixKey});
   Future<AppUser> login();
+  Future<AppUser> updateNickname(String nickname);
 }
 
 class HttpAuthApi implements AuthApi {
@@ -23,6 +24,12 @@ class HttpAuthApi implements AuthApi {
   @override
   Future<AppUser> login() async {
     final data = await _client.post('/auth/login');
+    return AppUser.fromJson(data as Map<String, dynamic>);
+  }
+
+  @override
+  Future<AppUser> updateNickname(String nickname) async {
+    final data = await _client.patch('/auth/nickname', body: {'nickname': nickname});
     return AppUser.fromJson(data as Map<String, dynamic>);
   }
 }

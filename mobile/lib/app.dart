@@ -11,6 +11,7 @@ import 'services/auth_api.dart';
 import 'services/cubes_api.dart';
 import 'services/mining_api.dart';
 import 'services/pix_api.dart';
+import 'services/ranking_api.dart';
 import 'services/rewarded_ad_service.dart';
 import 'services/wallet_api.dart';
 import 'theme/app_theme.dart';
@@ -36,6 +37,7 @@ class CubeMinePixApp extends StatelessWidget {
         ProxyProvider<ApiClient, MiningApi>(update: (_, client, _) => HttpMiningApi(client)),
         ProxyProvider<ApiClient, WalletApi>(update: (_, client, _) => HttpWalletApi(client)),
         ProxyProvider<ApiClient, PixApi>(update: (_, client, _) => HttpPixApi(client)),
+        ProxyProvider<ApiClient, RankingApi>(update: (_, client, _) => HttpRankingApi(client)),
         Provider<RewardedAdService>(create: (_) => GoogleMobileAdsRewardedService()),
       ],
       child: MaterialApp(

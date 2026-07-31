@@ -87,6 +87,22 @@ class ApiClient {
     return _handle(response);
   }
 
+  Future<dynamic> patch(
+    String path, {
+    Object? body,
+    bool auth = true,
+  }) async {
+    final uri = Uri.parse('$baseUrl$path');
+    final response = await _withTimeout(
+      _client.patch(
+        uri,
+        headers: await _headers(auth: auth),
+        body: body == null ? null : jsonEncode(body),
+      ),
+    );
+    return _handle(response);
+  }
+
   Future<http.Response> _withTimeout(Future<http.Response> request) {
     return request.timeout(
       requestTimeout,

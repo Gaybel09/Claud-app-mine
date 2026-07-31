@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../widgets/app_background.dart';
 import '../cube/cube_screen.dart';
+import '../ranking/ranking_screen.dart';
 import '../wallet/wallet_screen.dart';
 
 class HomeShell extends StatefulWidget {
@@ -14,7 +15,7 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  static const _screens = [CubeScreen(), WalletScreen()];
+  static const _screens = [CubeScreen(), RankingScreen(), WalletScreen()];
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +29,11 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.widgets_outlined),
             selectedIcon: Icon(Icons.widgets),
             label: 'Cubo',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.leaderboard_outlined),
+            selectedIcon: Icon(Icons.leaderboard),
+            label: 'Ranking',
           ),
           NavigationDestination(
             icon: Icon(Icons.account_balance_wallet_outlined),
