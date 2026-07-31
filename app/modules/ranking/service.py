@@ -68,27 +68,23 @@ def display_name(user: User) -> str:
 
 
 def region_code_for(user: User) -> str | None:
-    """Escopo regional do ranking: estado (formato "BR-UF", ex: "BR-SP")
-    para usuários no Brasil com estado detectado, país (código ISO puro,
-    ex: "US") para os demais -- inclusive brasileiros sem estado detectado
-    ainda (cai no país "BR"). O prefixo "BR-" evita colisão entre um UF de 2
-    letras e um código de país de 2 letras que por acaso coincidam (ex: "TO"
-    é Tocantins E o código ISO de Tonga).
+    """Escopo regional do ranking: só por estado brasileiro (UF), formato
+    "BR-UF" (ex: "BR-SP") -- decisão confirmada com o usuário: sem ranking
+    por país pra quem está fora do Brasil (app é majoritariamente
+    Brasil/Pix/BRL por ora).
 
-    None quando país/estado nunca foram detectados -- usuário fica de fora
-    do ranking regional, mas continua normalmente no ranking geral."""
-    if user.country_code is None:
-        return None
+    None para qualquer usuário sem os dois -- país=="BR" E estado --
+    detectados: usuários fora do Brasil, ou cuja geolocalização ainda não
+    identificou o estado. Esses usuários ficam de fora do ranking
+    regional, mas continuam normalmente no ranking geral."""
     if user.country_code == "BR" and user.state_code:
         return f"BR-{user.state_code}"
-    return user.country_code
+    return None
 
 
 def region_label_for(region_code: str) -> str:
-    if region_code.startswith("BR-"):
-        uf = region_code[3:]
-        return BRAZIL_STATE_NAMES.get(uf, uf)
-    return region_code
+    uf = region_code.removeprefix("BR-")
+    return BRAZIL_STATE_NAMES.get(uf, uf)
 
 
 def _lifetime_totals(db: Session) -> list[tuple[User, Decimal]]:

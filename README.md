@@ -566,8 +566,10 @@ compartilhadas automaticamente entre serviços no Render.
   `reward` no ledger (nunca reseta -- sacar via Pix não derruba a posição de
   ninguém, ver `_lifetime_totals` em `app/modules/ranking/service.py`).
 - **Regional**: Top 10 do mesmo escopo, mas só entre usuários do mesmo
-  estado (Brasil) ou país (demais), detectado por IP no cadastro/login --
-  `null` se o usuário ainda não tem localização detectada.
+  estado brasileiro (UF), detectado por IP no cadastro/login -- `null` se o
+  usuário está fora do Brasil ou ainda não tem estado detectado (app é
+  majoritariamente Brasil/Pix/BRL por ora; sem ranking por país para quem
+  está fora).
 
 Cada escopo devolve `top` (lista ordenada) e `my_rank`/`my_total` (posição e
 total do usuário autenticado, mesmo que fora do `top`).

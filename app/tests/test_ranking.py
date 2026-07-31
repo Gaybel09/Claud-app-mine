@@ -110,15 +110,19 @@ def test_region_code_for_brazilian_user_uses_state():
     assert region_label_for("BR-SP") == "São Paulo"
 
 
-def test_region_code_for_brazilian_user_without_state_falls_back_to_country():
+def test_region_code_for_brazilian_user_without_state_is_none():
+    # Decisão confirmada: sem ranking regional por país -- um brasileiro
+    # cujo estado ainda não foi detectado fica de fora do regional (mas
+    # continua valendo no geral), em vez de cair num balde "BR" genérico.
     user = User(firebase_uid="x", email="x@example.com", country_code="BR", state_code=None)
-    assert region_code_for(user) == "BR"
+    assert region_code_for(user) is None
 
 
-def test_region_code_for_foreign_user_uses_country_only():
+def test_region_code_for_foreign_user_is_none():
+    # Sem ranking por país pra quem está fora do Brasil (decisão
+    # confirmada: app é majoritariamente Brasil/Pix/BRL por ora).
     user = User(firebase_uid="x", email="x@example.com", country_code="US", state_code="CA")
-    assert region_code_for(user) == "US"
-    assert region_label_for("US") == "US"
+    assert region_code_for(user) is None
 
 
 def test_region_code_for_undetected_location_is_none():
@@ -126,14 +130,16 @@ def test_region_code_for_undetected_location_is_none():
     assert region_code_for(user) is None
 
 
-def test_region_codes_do_not_collide_between_brazilian_state_and_country_code():
-    # "TO" é Tocantins (UF) E o código ISO de Tonga -- o prefixo "BR-" evita
-    # que os dois caiam no mesmo balde de ranking regional.
+def test_region_code_for_brazilian_state_does_not_collide_with_a_same_named_foreign_country():
+    # "TO" é Tocantins (UF) E o código ISO de Tonga -- sem ranking regional
+    # por país (ver test_region_code_for_foreign_user_is_none), um usuário
+    # de Tonga nunca teria region_code de qualquer forma, mas o prefixo
+    # "BR-" também garante que os dois nunca colidiriam se essa decisão
+    # mudar no futuro.
     tocantins_user = User(firebase_uid="a", email="a@example.com", country_code="BR", state_code="TO")
     tonga_user = User(firebase_uid="b", email="b@example.com", country_code="TO", state_code=None)
-    assert region_code_for(tocantins_user) != region_code_for(tonga_user)
     assert region_code_for(tocantins_user) == "BR-TO"
-    assert region_code_for(tonga_user) == "TO"
+    assert region_code_for(tonga_user) is None
 
 
 # --- GET /ranking -----------------------------------------------------------
