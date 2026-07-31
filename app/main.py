@@ -12,6 +12,7 @@ from app.modules.cubes.router import router as cubes_router
 from app.modules.health.router import router as health_router
 from app.modules.mining.router import router as mining_router
 from app.modules.pix.router import router as pix_router
+from app.modules.ranking.router import router as ranking_router
 from app.modules.reward.router import router as reward_router
 from app.modules.wallet.router import router as wallet_router
 
@@ -31,5 +32,6 @@ app.include_router(mining_router)
 app.include_router(cubes_router)
 app.include_router(pix_router)
 app.include_router(reward_router)
+app.include_router(ranking_router)
 app.include_router(admin_router)
 app.include_router(admin_panel_router)

@@ -10,6 +10,7 @@ from app.models.user import User
 from app.modules.admin.register_webhook import run_register_efi_webhook
 from app.modules.admin.smoke_test import run_pix_smoke_test
 from app.modules.mining.service import force_session_ready_for_testing
+from app.modules.ranking.service import run_monthly_ranking_payout
 from app.modules.reward.service import update_reward_config_from_admob
 from app.workers.tasks import reconcile_stuck_withdrawals
 
@@ -145,6 +146,23 @@ def update_reward_config(db: Session = Depends(get_db)):
         "avg_ecpm": str(config.avg_ecpm) if config.avg_ecpm is not None else None,
         "updated_at": config.updated_at.isoformat(),
     }
+
+
+@router.get("/run-monthly-ranking-payout", dependencies=[Depends(require_admin_token)])
+def run_monthly_ranking_payout_endpoint(db: Session = Depends(get_db)):
+    """Roda manualmente a mesma lógica do job mensal de ranking (seção
+    "Ranking", ver app/modules/ranking/service.py), sem esperar o
+    agendamento do Cron Job -- útil para validar o cálculo/pagamento do
+    Top 10 do mês sem esperar o dia 1.
+
+    APENAS PARA DIAGNÓSTICO... mas escreve de verdade (não é revertido ao
+    final, ao contrário de /admin/smoke-test/pix) -- credita bônus reais no
+    ledger e debita o reward_fund, exatamente como o Cron Job faria.
+    Idempotente por reference_id (ver _credit_ranking_bonus): rodar de novo
+    no mesmo mês não paga a mesma posição duas vezes.
+    """
+    result = run_monthly_ranking_payout(db)
+    return {"ok": True, **result}
 
 
 @router.post("/withdrawals/reconcile-all", dependencies=[Depends(require_admin_token)])

@@ -44,3 +44,21 @@ class User(Base):
     # é só um sinal de possível abuso, visível pro admin em
     # GET /admin/users/{id}/devices.
     device_id: Mapped[str | None] = mapped_column(String(255), index=True, nullable=True)
+
+    # Ranking (app/modules/ranking/): apelido público exibido no lugar do
+    # email nas listas de Top 10 -- opcional, definido pelo próprio usuário
+    # (PATCH /auth/nickname). Sem unicidade forçada de propósito (mais de um
+    # usuário com o mesmo apelido é só uma coincidência cosmética, não afeta
+    # a lógica de ranking, que sempre usa user_id internamente).
+    nickname: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # País (ISO 3166-1 alpha-2, ex: "BR") e estado/subdivisão (ISO 3166-2, ex:
+    # "SP") detectados via IP no login (ver app/core/geoip.py). Atualizados a
+    # cada login -- não só no cadastro -- para se autocorrigir caso a
+    # primeira detecção tenha sido imprecisa (ex: rede móvel/VPN no
+    # cadastro). Ambos nullable: usuários antigos (antes desta feature) ou
+    # cujo IP não bate com nenhuma entrada do GeoLite2 ficam de fora do
+    # ranking regional até o próximo login bem-sucedido, mas continuam
+    # normalmente no ranking geral.
+    country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    state_code: Mapped[str | None] = mapped_column(String(8), nullable=True)

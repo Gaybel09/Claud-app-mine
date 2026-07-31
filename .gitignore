@@ -9,3 +9,8 @@ venv/
 htmlcov/
 .DS_Store
 dump.rdb
+
+# Banco GeoLite2-City (ver scripts/download_geoip_db.py) -- binário grande e
+# a licença gratuita da MaxMind não permite redistribuir o arquivo, cada
+# ambiente baixa o seu com a própria license key.
+geoip/

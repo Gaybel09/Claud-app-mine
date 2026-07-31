@@ -138,6 +138,20 @@ class Settings(BaseSettings):
     # README) -- o worker diário não faz isso sozinho.
     ADMOB_USD_TO_BRL_RATE: Decimal = Decimal("5.50")
 
+    # Ranking (país/estado do usuário para o escopo regional, ver
+    # app/modules/ranking/): caminho local do banco GeoLite2-City da MaxMind,
+    # baixado via scripts/download_geoip_db.py. Escolhido em vez de uma API
+    # HTTP de geolocalização por IP porque é gratuito, sem limite de taxa e
+    # sem chamada de rede por requisição -- só precisa que o arquivo exista
+    # no disco. Sem o arquivo (ex: ainda não configurado), a detecção de
+    # país/estado fica desligada de forma graciosa (ver app/core/geoip.py) em
+    # vez de quebrar o login.
+    GEOIP_DB_PATH: str | None = "geoip/GeoLite2-City.mmdb"
+    # Conta gratuita em maxmind.com/en/geolite2/signup -- usada só pelo
+    # script de download acima, nunca em tempo de requisição.
+    GEOIP_ACCOUNT_ID: str | None = None
+    GEOIP_LICENSE_KEY: str | None = None
+
     @property
     def DATABASE_URL(self) -> str:
         if self.DATABASE_URL_ENV:

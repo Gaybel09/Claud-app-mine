@@ -493,7 +493,7 @@ por dia a partir do eCPM médio real do bloco de anúncios premiado no
 AdMob:
 
 ```
-valor_por_sessão = clamp(eCPM_médio * ADMOB_REWARD_MARGIN / 1000, R$0,10, R$1,00)
+valor_por_sessão = clamp(eCPM_médio * ADMOB_REWARD_MARGIN / 1000, R$0,01, R$1,00)
 ```
 
 - **Worker diário** (`reward.update_reward_config`, agendado às 6h UTC em
@@ -557,6 +557,82 @@ reconciliação de saques Pix, `pix.reconcile_pending_withdrawals` a cada
 valor de `ADMIN_SMOKE_TEST_TOKEN` (do serviço web) no serviço cron
 `cubemine-pix-update-reward-config` -- variáveis de ambiente não são
 compartilhadas automaticamente entre serviços no Render.
+
+## Ranking
+
+`GET /ranking` devolve dois escopos, sempre coexistindo:
+
+- **Geral**: Top 10 de todos os usuários pelo total histórico acumulado de
+  `reward` no ledger (nunca reseta -- sacar via Pix não derruba a posição de
+  ninguém, ver `_lifetime_totals` em `app/modules/ranking/service.py`).
+- **Regional**: Top 10 do mesmo escopo, mas só entre usuários do mesmo
+  estado (Brasil) ou país (demais), detectado por IP no cadastro/login --
+  `null` se o usuário ainda não tem localização detectada.
+
+Cada escopo devolve `top` (lista ordenada) e `my_rank`/`my_total` (posição e
+total do usuário autenticado, mesmo que fora do `top`).
+
+### Apelido (`PATCH /auth/nickname`)
+
+O ranking mostra `nickname` no lugar do e-mail (evita vazar PII na lista
+pública) -- se o usuário nunca definiu um, cai no fallback `"Minerador
+#<id>"`. Sem verificação de unicidade de propósito (ver `User.nickname`).
+
+### Detecção de país/estado (GeoLite2, sem custo por requisição)
+
+`country_code`/`state_code` (`app/models/user.py`) são preenchidos no
+cadastro e reavaliados a cada login, a partir do IP do cliente
+(`app/core/geoip.py`), usando o banco **GeoLite2-City da MaxMind** salvo
+localmente em `GEOIP_DB_PATH` (default `geoip/GeoLite2-City.mmdb`, ignorado
+pelo git -- a licença gratuita não permite redistribuir o arquivo). Preferido
+a uma API HTTP de geolocalização de terceiro porque é gratuito, sem limite
+de taxa e sem chamada de rede por requisição.
+
+Sem o arquivo `.mmdb` presente, a detecção fica desligada de forma graciosa
+(`country_code`/`state_code` ficam `None`) -- login/cadastro nunca falham
+por causa disso.
+
+**Setup**:
+1. Crie uma conta gratuita em <https://www.maxmind.com/en/geolite2/signup> e
+   gere uma license key (Minha conta > Gerenciar chaves de licença).
+2. `export GEOIP_ACCOUNT_ID=... GEOIP_LICENSE_KEY=...`
+3. `python scripts/download_geoip_db.py`
+
+Em produção (Render), o mesmo script roda automaticamente no
+`buildCommand` do serviço web a cada deploy (`render.yaml`), best-effort
+(`|| true`) -- basta configurar `GEOIP_ACCOUNT_ID`/`GEOIP_LICENSE_KEY` no
+dashboard. A MaxMind atualiza o GeoLite2 algumas vezes por mês; um app com
+poucos usuários não precisa de mais que isso.
+
+### Bônus mensal do Top 10
+
+Todo mês, os Top 10 de cada escopo (geral + cada região com usuários
+premiáveis) ganham um bônus creditado automaticamente na carteira (tipo
+`bonus` no ledger), por posição:
+
+| 1º | 2º | 3º | 4º | 5º | 6º | 7º | 8º | 9º | 10º |
+|----|----|----|----|----|----|----|----|----|-----|
+| R$1,00 | R$0,90 | R$0,80 | R$0,70 | R$0,60 | R$0,50 | R$0,40 | R$0,30 | R$0,20 | R$0,10 |
+
+- Os dois escopos são independentes e **empilháveis**: um usuário no Top 10
+  geral E no Top 10 do seu estado no mesmo mês recebe os dois prêmios.
+- Não existe nenhum contador "do mês" para resetar -- o Top 10 mensal é
+  sempre recalculado direto pela janela de datas em
+  `LedgerEntry.created_at` (`_month_window`/`_monthly_totals`); o ranking
+  geral (acumulado) usa uma métrica totalmente separada, então não há
+  estado compartilhado para corromper.
+- Idempotente por `reference_id` (`ranking-bonus-<escopo>-<AAAA-MM>-pos<N>`)
+  -- rodar o job de novo no mesmo mês nunca paga a mesma posição duas vezes.
+- Se o `reward_fund` não tiver saldo suficiente para uma posição específica,
+  ela é pulada (reportada em `insufficient_fund` na resposta) sem travar o
+  pagamento das demais -- rodar o job de novo depois de reforçar o fundo
+  paga as posições que ficaram pendentes.
+- Lógica em `run_monthly_ranking_payout`
+  (`app/modules/ranking/service.py`); diagnóstico manual em
+  `GET /admin/run-monthly-ranking-payout`; agendado em produção via Render
+  Cron Job (`cubemine-pix-monthly-ranking-payout`, dia 1 de cada mês às 7h
+  UTC, `scripts/trigger_monthly_ranking_payout.py`) -- mesmo padrão do Cron
+  Job de `update-reward-config` acima.
 
 ### Conversão USD -> BRL do eCPM
 

@@ -3,6 +3,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.core import firebase
+from app.core.geoip import get_client_ip, lookup_country_state
 from app.core.rate_limit import (
     LOGIN_LIMIT_PER_IP,
     LOGIN_LIMIT_PER_TOKEN,
@@ -16,7 +17,7 @@ from app.db.session import get_db
 from app.models.cube import create_starter_cube
 from app.models.user import User
 from app.schemas.auth import TwoFactorVerifyRequest
-from app.schemas.user import UserRegister, UserRead
+from app.schemas.user import NicknameUpdate, UserRegister, UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -43,12 +44,15 @@ def register(
     # próprio app Flutter, só capturado aqui no cadastro (ver
     # User.device_id). Opcional: clientes que ainda não mandam o header
     # simplesmente não ficam com device_id nenhum.
+    country_code, state_code = lookup_country_state(get_client_ip(request))
     user = User(
         firebase_uid=firebase_uid,
         email=email,
         phone=payload.phone,
         pix_key=payload.pix_key,
         device_id=x_device_id,
+        country_code=country_code,
+        state_code=state_code,
     )
     db.add(user)
     db.flush()  # popula user.id para o cubo inicial referenciar via FK
@@ -64,7 +68,31 @@ def register(
 @router.post("/login", response_model=UserRead)
 @limiter.limit(LOGIN_LIMIT_PER_IP, key_func=get_remote_address)
 @limiter.limit(LOGIN_LIMIT_PER_TOKEN, key_func=get_auth_token_key)
-def login(request: Request, current_user: User = Depends(get_current_user)):
+def login(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Reavaliado a cada login (não só no cadastro) para se autocorrigir caso
+    # a primeira detecção tenha sido imprecisa (ex: rede móvel/VPN) -- ver
+    # User.country_code/state_code e app/core/geoip.py.
+    country_code, state_code = lookup_country_state(get_client_ip(request))
+    if country_code != current_user.country_code or state_code != current_user.state_code:
+        current_user.country_code = country_code
+        current_user.state_code = state_code
+        db.commit()
+        db.refresh(current_user)
+    return current_user
+
+
+@router.patch("/nickname", response_model=UserRead)
+def update_nickname(
+    payload: NicknameUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Apelido exibido no ranking (app/modules/ranking/) no lugar do email.
+    Sem verificação de unicidade de propósito -- ver comentário em
+    User.nickname."""
+    current_user.nickname = payload.nickname.strip()
+    db.commit()
+    db.refresh(current_user)
     return current_user
 
 
