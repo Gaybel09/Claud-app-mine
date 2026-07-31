@@ -25,7 +25,13 @@ services:
     runtime: python
     plan: free
     region: oregon
-    buildCommand: pip install -r requirements.txt
+    # download_geoip_db.py (seção "Ranking") baixa o banco GeoLite2-City pra
+    # detecção de país/estado no login -- "|| true" pra um deploy nunca
+    # falhar por causa disso: sem GEOIP_LICENSE_KEY ainda configurada, ou
+    # se a MaxMind ficar fora do ar num deploy específico, app/core/geoip.py
+    # já degrada de forma graciosa (país/estado ficam None) em vez de
+    # quebrar o login.
+    buildCommand: pip install -r requirements.txt && (python scripts/download_geoip_db.py || true)
     # Migrations rodam a cada deploy, antes do servidor subir -- se
     # alembic upgrade head falhar, o deploy falha e a versão anterior
     # continua no ar.
@@ -129,6 +135,15 @@ services:
       # a cotação real mudar (ver README). O worker não busca câmbio ao vivo.
       - key: ADMOB_USD_TO_BRL_RATE
         value: "5.50"
+      # Ranking (país/estado do usuário, seção "Ranking") -- conta gratuita
+      # em maxmind.com/en/geolite2/signup, usada só pelo
+      # scripts/download_geoip_db.py rodado no buildCommand acima. Sem essas
+      # 2 variáveis, o download é pulado (deploy não falha) e a detecção de
+      # país/estado fica desligada (ver app/core/geoip.py).
+      - key: GEOIP_ACCOUNT_ID
+        sync: false
+      - key: GEOIP_LICENSE_KEY
+        sync: false
 
   - type: keyvalue
     name: cubemine-pix-redis
@@ -137,21 +152,90 @@ services:
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
 
+  # Rede de segurança para saques Pix presos em "processing" (seção 11,
+  # correção v2) -- roda pix.reconcile_pending_withdrawals (ver
+  # app/workers/celery_app.py) a cada 60s, consultando a Efí direto pra
+  # todo saque parado há mais de RECONCILE_AFTER_MINUTES (3min, ver
+  # app/modules/pix/service.py). Existe porque a confiabilidade do webhook
+  # automático (POST /pix/webhook, /pix/webhook/pix) sozinho nunca foi
+  # comprovada (ver investigação do saque #10 -- 34+ min preso em
+  # "processing" até reconciliação manual) -- o webhook continua ativo para
+  # resposta rápida quando funciona; este worker garante que nenhum saque
+  # fica preso indefinidamente, funcione o webhook ou não.
+  #
+  # `--beat` embutido no mesmo processo do worker (em vez de dois serviços
+  # separados, worker + beat) -- mais barato, mas só é seguro com EXATAMENTE
+  # 1 instância: escalar este serviço pra mais de 1 réplica faria cada
+  # instância rodar seu próprio scheduler e disparar a mesma tarefa várias
+  # vezes (ao contrário do serviço web acima, sem estado, que escala sem
+  # problema). Nunca aumente o "scaling"/número de instâncias deste serviço
+  # sem separar worker e beat antes.
+  #
+  # ATENÇÃO CUSTO: ao contrário do Cron Job de update-reward-config abaixo
+  # (cobrado só pelos segundos que roda), um Background Worker é cobrado
+  # pelo mês inteiro, rodando ou não -- não existe tier free pra este tipo
+  # de serviço no Render. O plano mais barato com Background Worker
+  # ("starter") gira em torno de US$7/mês (valor aproximado -- confirme o
+  # preço atual no seu dashboard do Render antes de habilitar). Apertar o
+  # intervalo de checagem (60s, bem mais frequente que os 5min originais)
+  # NÃO aumenta esse custo -- o processo já fica de pé 24/7 de qualquer
+  # forma, então checar mais vezes é essencialmente grátis; o único motivo
+  # pra não apertar ainda mais é RECONCILE_AFTER_MINUTES já ser o fator que
+  # domina o pior caso de espera, não o intervalo do beat em si.
+  - type: worker
+    name: cubemine-pix-reconcile-worker
+    runtime: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.workers.celery_app worker --beat --loglevel=info --concurrency=1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.15
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cubemine-pix-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: cubemine-pix-redis
+          property: connectionString
+      # MESMOS valores de produção configurados no serviço web
+      # "cubemine-pix-api" -- necessários pra autenticar com a Efí
+      # (efi_client.get_send_status) ao reconciliar. O Render não
+      # compartilha env vars entre serviços automaticamente (a menos que
+      # se use um Environment Group pelo dashboard) -- cole os mesmos
+      # valores aqui depois do primeiro deploy. EFI_PAYER_PIX_KEY não é
+      # necessária aqui (só usada por send_pix/register_webhook, não por
+      # get_send_status).
+      - key: EFI_CLIENT_ID
+        sync: false
+      - key: EFI_CLIENT_SECRET
+        sync: false
+      - key: EFI_CERTIFICATE_PEM
+        sync: false
+      - key: EFI_CERTIFICATE_BASE64
+        sync: false
+      - key: EFI_CERTIFICATE_PATH
+        sync: false
+      - key: EFI_SANDBOX
+        value: "false"
+
   # Roda diariamente GET /admin/update-reward-config (seção 7) -- ver
-  # scripts/trigger_update_reward_config.py. Escolhido em vez de um
-  # Background Worker com Celery Beat de verdade porque, para uma única
-  # tarefa 1x/dia, um Cron Job (container efêmero, cobrado só pelos
-  # segundos que roda) é bem mais barato do que manter um Background Worker
-  # rodando 24/7 só para o Celery Beat checar o agendamento -- e reaproveita
-  # o endpoint admin que já existe e já foi testado manualmente, sem
-  # precisar rodar `celery worker`/`celery beat` como processos separados
-  # em produção. Reconsidere migrar para Celery Beat de verdade só se
-  # surgirem várias tarefas periódicas diferentes (o beat_schedule em
-  # app/workers/celery_app.py já está pronto para isso).
+  # scripts/trigger_update_reward_config.py. Escolhido em vez de agendar
+  # via Celery Beat porque, para uma única tarefa 1x/dia, um Cron Job
+  # (container efêmero, cobrado só pelos segundos que roda) é bem mais
+  # barato do que rodar mais uma vez por dia dentro do Background Worker
+  # acima -- e reaproveita o endpoint admin que já existe e já foi testado
+  # manualmente. reward.update_reward_config (a task Celery equivalente)
+  # continua definida em app/workers/tasks.py mas DELIBERADAMENTE fora do
+  # beat_schedule do worker acima, pra não consultar a AdMob Reporting API
+  # duas vezes por dia por dois mecanismos diferentes.
   #
   # ATENÇÃO: Cron Jobs no Render não têm tier free -- exigem um plano pago
   # (a partir de ~US$1/mês, cobrado só pelo tempo de execução), mesmo assim
-  # ordens de magnitude mais barato que um Background Worker full-time.
+  # ordens de magnitude mais barato que manter isso num Background Worker.
   # "schedule" é sempre interpretado em UTC pelo Render, independente da
   # região do serviço.
   - type: cron
@@ -171,5 +255,32 @@ services:
       # o Render não compartilha env vars entre serviços automaticamente
       # (a menos que se use um Environment Group pelo dashboard). Cole o
       # mesmo token aqui depois do primeiro deploy.
+      - key: ADMIN_SMOKE_TEST_TOKEN
+        sync: false
+
+  # Roda mensalmente GET /admin/run-monthly-ranking-payout (seção
+  # "Ranking") -- ver scripts/trigger_monthly_ranking_payout.py. Mesmo
+  # raciocínio do Cron Job de update-reward-config acima: reaproveita o
+  # endpoint admin já existente e testado, em vez de agendar via Celery
+  # Beat/Background Worker.
+  #
+  # "0 7 1 * *": dia 1 de cada mês, 7h UTC (1h depois do Cron Job diário de
+  # reward-config, sem motivo especial além de não rodar os dois exatamente
+  # no mesmo minuto) -- fecha o Top 10 do mês que acabou de terminar (ver
+  # _month_window em app/modules/ranking/service.py, que por padrão usa o
+  # mês ANTERIOR ao dia em que roda).
+  - type: cron
+    name: cubemine-pix-monthly-ranking-payout
+    runtime: python
+    plan: starter
+    region: oregon
+    schedule: "0 7 1 * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/trigger_monthly_ranking_payout.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.15
+      - key: PUBLIC_BASE_URL
+        value: https://cubemine-pix-api.onrender.com
       - key: ADMIN_SMOKE_TEST_TOKEN
         sync: false
