@@ -8,11 +8,13 @@ import 'package:cubemine_pix/models/cube.dart';
 import 'package:cubemine_pix/models/ledger_entry.dart';
 import 'package:cubemine_pix/models/mining_session.dart';
 import 'package:cubemine_pix/models/ranking.dart';
+import 'package:cubemine_pix/models/weekly_mission.dart';
 import 'package:cubemine_pix/models/withdrawal.dart';
 import 'package:cubemine_pix/services/ads_api.dart';
 import 'package:cubemine_pix/services/auth_api.dart';
 import 'package:cubemine_pix/services/cubes_api.dart';
 import 'package:cubemine_pix/services/mining_api.dart';
+import 'package:cubemine_pix/services/missions_api.dart';
 import 'package:cubemine_pix/services/pix_api.dart';
 import 'package:cubemine_pix/services/ranking_api.dart';
 import 'package:cubemine_pix/services/rewarded_ad_service.dart';
@@ -132,6 +134,30 @@ class FakeRankingApi implements RankingApi {
         const RankingResult(
           general: ScopeRanking(top: [], myRank: null, myTotal: 0),
           regional: null,
+        );
+  }
+}
+
+class FakeMissionsApi implements MissionsApi {
+  WeeklyMission? resultToReturn;
+  Object? throwOnGetWeeklyMission;
+  int getWeeklyMissionCallCount = 0;
+
+  @override
+  Future<WeeklyMission> getWeeklyMission() async {
+    getWeeklyMissionCallCount++;
+    if (throwOnGetWeeklyMission != null) throw throwOnGetWeeklyMission!;
+    final now = DateTime.now();
+    return resultToReturn ??
+        WeeklyMission(
+          target: 10,
+          progress: 0,
+          completed: false,
+          weekStart: now,
+          weekEnd: now.add(const Duration(days: 7)),
+          multiplier: 1.5,
+          multiplierActive: false,
+          multiplierExpiresAt: null,
         );
   }
 }

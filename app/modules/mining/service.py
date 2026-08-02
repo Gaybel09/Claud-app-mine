@@ -12,7 +12,9 @@ from app.models.cube import Cube
 from app.models.ledger_entry import LedgerEntry, LedgerEntryType
 from app.models.mining_session import MiningSession, MiningSessionStatus
 from app.models.reward_fund import SINGLETON_ID, RewardFund
+from app.models.user import User
 from app.modules.ads.service import is_ad_confirmed
+from app.modules.missions.service import WEEKLY_MISSION_MULTIPLIER, is_multiplier_active, maybe_activate_weekly_mission
 from app.modules.reward.service import get_current_value_per_session
 from app.modules.wallet.service import create_ledger_entry
 
@@ -391,12 +393,17 @@ def collect_mining_session(db: Session, user_id: int, session_id: int) -> tuple[
     if session.status != MiningSessionStatus.RUNNING:
         raise SessionNotReadyError()
 
+    now = datetime.now(timezone.utc)
     # Nunca confia num status pré-calculado: recalcula now() >= ends_at aqui,
     # sob o lock que acabamos de tomar.
-    if datetime.now(timezone.utc) < session.ends_at:
+    if now < session.ends_at:
         raise SessionNotReadyError()
 
     reward_fund = db.query(RewardFund).filter(RewardFund.id == SINGLETON_ID).with_for_update().first()
+    # Lock de linha em `users` (mesmo padrão de start_mining_session pra
+    # `cubes`) -- serializa contra outra coleta concorrente do mesmo
+    # usuário que também leia/mute weekly_mission_multiplier_until.
+    user = db.query(User).filter(User.id == user_id).with_for_update().first()
 
     # Seção 7: valor vigente da reward_config (recalculado 1x/dia a partir
     # do eCPM real do AdMob -- ver app/modules/reward/service.py), não mais
@@ -406,11 +413,20 @@ def collect_mining_session(db: Session, user_id: int, session_id: int) -> tuple[
         # Cubo Épico -- ver apply_epic_bonus/EPIC_BONUS_MULTIPLIER. Lido do
         # value_per_session VIGENTE agora (na coleta), não do valor de quando
         # o bônus foi aplicado -- reward_config pode ter mudado entre os
-        # dois momentos (recalculada 1x/dia). ROUND_DOWN (nunca a favor do
-        # usuário), mesmo critério de compute_value_per_session.
-        reward_amount = (reward_amount * EPIC_BONUS_MULTIPLIER).quantize(
-            Decimal("0.01"), rounding=ROUND_DOWN
-        )
+        # dois momentos (recalculada 1x/dia).
+        reward_amount *= EPIC_BONUS_MULTIPLIER
+    if is_multiplier_active(user, now):
+        # Missão semanal (app/modules/missions/service.py) -- empilha em
+        # cadeia com o Cubo Épico acima (decisão confirmada: multiplicativo,
+        # não aditivo). Nunca se aplica à própria coleta que COMPLETA a
+        # missão (ver maybe_activate_weekly_mission mais abaixo, chamada
+        # só depois desta reward_amount já estar calculada).
+        reward_amount *= WEEKLY_MISSION_MULTIPLIER
+    # Quantiza uma única vez, depois de encadear os dois multiplicadores
+    # (em vez de arredondar a cada um) -- evita erro de arredondamento
+    # composto. ROUND_DOWN (nunca a favor do usuário), mesmo critério de
+    # compute_value_per_session.
+    reward_amount = reward_amount.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
     max_allowed = reward_fund.balance * REWARD_FUND_SAFETY_MARGIN
     if reward_amount > max_allowed:
         # Falha segura: nada foi mutado ainda (nem reward_fund, nem a
@@ -419,7 +435,7 @@ def collect_mining_session(db: Session, user_id: int, session_id: int) -> tuple[
 
     reward_fund.balance -= reward_amount
     reward_fund.total_out += reward_amount
-    reward_fund.updated_at = datetime.now(timezone.utc)
+    reward_fund.updated_at = now
 
     create_ledger_entry(
         db,
@@ -431,8 +447,15 @@ def collect_mining_session(db: Session, user_id: int, session_id: int) -> tuple[
 
     session.status = MiningSessionStatus.COLLECTED
 
-    # Tudo -- débito do fundo, ledger entry, status da sessão -- num único
-    # commit atômico no final (seção 7, passo 6).
+    # Depois da entry gravada (a contagem semanal do missions.service já
+    # inclui essa coleta, ver weekly_collections_count) -- se essa foi a
+    # 10ª coleta da semana, ativa o multiplicador pras PRÓXIMAS coletas
+    # (nunca pra esta).
+    maybe_activate_weekly_mission(db, user, now)
+
+    # Tudo -- débito do fundo, ledger entry, status da sessão, eventual
+    # ativação da missão semanal -- num único commit atômico no final
+    # (seção 7, passo 6).
     db.commit()
     db.refresh(session)
     return session, reward_amount

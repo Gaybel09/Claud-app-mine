@@ -62,3 +62,17 @@ class User(Base):
     # normalmente no ranking geral.
     country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
     state_code: Mapped[str | None] = mapped_column(String(8), nullable=True)
+
+    # Missão semanal "Minere 10x essa semana" (app/modules/missions/):
+    # timestamp de expiração do multiplicador de recompensa (1.5x, ver
+    # WEEKLY_MISSION_MULTIPLIER em app/modules/missions/service.py) ganho ao
+    # completar a missão -- None ou no passado significa "sem multiplicador
+    # ativo agora". É o único estado persistido do sistema de missões: o
+    # progresso (X/10 da semana) nunca é guardado aqui, é sempre recalculado
+    # a partir dos LedgerEntry `reward` do usuário na janela da semana atual
+    # (mesmo padrão que o ranking já usa pros totais mensais) -- só o
+    # instante exato em que a missão foi completada precisa ser persistido,
+    # porque é um evento (não dá pra derivar de uma soma).
+    weekly_mission_multiplier_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
