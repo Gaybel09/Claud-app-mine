@@ -134,6 +134,11 @@ def maybe_activate_weekly_mission(db: Session, user: User, now: datetime | None 
     count = weekly_collections_count(db, user.id, start, end)
     if count == WEEKLY_MISSION_TARGET:
         user.weekly_mission_multiplier_until = now + WEEKLY_MISSION_MULTIPLIER_DURATION
+        # Sistema de XP/Níveis (app/modules/levels/service.py): único
+        # estado persistido do XP bônus de missão -- nunca reseta junto
+        # com a semana, é uma contagem vitalícia de quantas vezes essa
+        # missão já foi fechada.
+        user.weekly_missions_completed += 1
         logger.info(
             "weekly mission completed for user %s, multiplier active until %s",
             user.id,

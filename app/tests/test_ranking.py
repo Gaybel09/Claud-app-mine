@@ -9,6 +9,7 @@ from app.models.ledger_entry import LedgerEntry, LedgerEntryType
 from app.models.reward_fund import SINGLETON_ID as FUND_SINGLETON_ID
 from app.models.reward_fund import RewardFund
 from app.models.user import User
+from app.modules.levels.service import WEEKLY_MISSION_XP_BONUS
 from app.modules.ranking.service import (
     MONTHLY_PAYOUT_SCALE,
     region_code_for,
@@ -84,6 +85,16 @@ def _top_up_reward_fund(amount: Decimal) -> None:
         fund = db.query(RewardFund).filter(RewardFund.id == FUND_SINGLETON_ID).first()
         fund.balance += amount
         fund.total_in += amount
+        db.commit()
+    finally:
+        db.close()
+
+
+def _set_weekly_missions_completed(user_id: int, count: int) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        user.weekly_missions_completed = count
         db.commit()
     finally:
         db.close()
@@ -356,3 +367,54 @@ def test_admin_run_monthly_ranking_payout_endpoint(client: TestClient, monkeypat
     response = client.get("/admin/run-monthly-ranking-payout", headers={"X-Admin-Token": "test-admin-token"})
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+# --- GET /ranking -- escopo by_level (XP/Nível, seção "Níveis") -----------
+
+
+def test_by_level_ranks_by_xp_not_by_money(client: TestClient, monkeypatch):
+    """Decisão de design: XP inclui o bônus fixo de missão semanal, que não
+    é dinheiro -- então a ordem por XP pode divergir da ordem por dinheiro
+    (ranking geral). Aqui, user_less_money tem menos dinheiro mas mais
+    missões completadas, e sai na frente no ranking por nível."""
+    user_more_money = _register_user(client, monkeypatch, "uid-level-money", "level-money@example.com")
+    user_less_money = _register_user(client, monkeypatch, "uid-level-missions", "level-missions@example.com")
+
+    _credit_reward(user_more_money, Decimal("10.00"), "money-1")  # 1000 XP, 0 missões
+    _credit_reward(user_less_money, Decimal("5.00"), "missions-1")  # 500 XP
+    _set_weekly_missions_completed(user_less_money, 10)  # + 10*100 = 1000 XP => total 1500 XP
+
+    monkeypatch.setattr(firebase, "verify_firebase_token", _fake_verify("uid-level-money", "level-money@example.com"))
+    response = client.get("/ranking", headers=_auth_header())
+    assert response.status_code == 200
+    top = response.json()["by_level"]["top"]
+
+    assert [entry["user_id"] for entry in top[:2]] == [user_less_money, user_more_money]
+    assert top[0]["xp"] == 1500
+    assert top[1]["xp"] == 1000
+
+
+def test_by_level_my_xp_and_level_present_even_with_zero_reward(client: TestClient, monkeypatch):
+    """Ao contrário de general/regional (que ficam com my_rank=None e
+    my_total=0 pra quem nunca coletou nada), todo usuário TEM um nível --
+    my_level/my_xp nunca ficam ausentes, mesmo pra quem nunca minerou."""
+    _register_user(client, monkeypatch, "uid-level-new", "level-new@example.com")
+
+    response = client.get("/ranking", headers=_auth_header())
+    assert response.status_code == 200
+    by_level = response.json()["by_level"]
+    assert by_level["my_level"] == 1
+    assert by_level["my_xp"] == 0
+    assert by_level["my_rank"] is None
+
+
+def test_by_level_reflects_mission_bonus_xp_for_the_current_user(client: TestClient, monkeypatch):
+    user_id = _register_user(client, monkeypatch, "uid-level-mine", "level-mine@example.com")
+    _credit_reward(user_id, Decimal("2.00"), "mine-1")  # 200 XP
+    _set_weekly_missions_completed(user_id, 3)  # + 3*100 = 300 XP
+
+    response = client.get("/ranking", headers=_auth_header())
+    assert response.status_code == 200
+    by_level = response.json()["by_level"]
+    assert by_level["my_xp"] == 200 + 3 * WEEKLY_MISSION_XP_BONUS
+    assert by_level["my_rank"] == 1

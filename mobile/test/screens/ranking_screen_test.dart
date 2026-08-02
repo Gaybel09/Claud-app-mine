@@ -33,6 +33,7 @@ void main() {
             myTotal: 30.0,
           ),
           regional: null,
+          byLevel: LevelScopeRanking(top: [], myRank: null, myLevel: 1, myXp: 0),
         );
 
       await tester.pumpWidget(_wrap(rankingApi: rankingApi));
@@ -53,6 +54,7 @@ void main() {
             myTotal: 1.0,
           ),
           regional: null,
+          byLevel: LevelScopeRanking(top: [], myRank: null, myLevel: 1, myXp: 0),
         );
 
       await tester.pumpWidget(_wrap(rankingApi: rankingApi));
@@ -67,6 +69,7 @@ void main() {
         ..resultToReturn = const RankingResult(
           general: ScopeRanking(top: [], myRank: null, myTotal: 0),
           regional: null,
+          byLevel: LevelScopeRanking(top: [], myRank: null, myLevel: 1, myXp: 0),
         );
 
       await tester.pumpWidget(_wrap(rankingApi: rankingApi));
@@ -81,6 +84,7 @@ void main() {
         ..resultToReturn = const RankingResult(
           general: ScopeRanking(top: [], myRank: null, myTotal: 0),
           regional: null,
+          byLevel: LevelScopeRanking(top: [], myRank: null, myLevel: 1, myXp: 0),
         );
 
       await tester.pumpWidget(_wrap(rankingApi: rankingApi));
@@ -104,6 +108,7 @@ void main() {
             regionCode: 'BR-SP',
             regionLabel: 'São Paulo',
           ),
+          byLevel: LevelScopeRanking(top: [], myRank: null, myLevel: 1, myXp: 0),
         );
 
       await tester.pumpWidget(_wrap(rankingApi: rankingApi));
@@ -125,6 +130,7 @@ void main() {
         ..resultToReturn = const RankingResult(
           general: ScopeRanking(top: [], myRank: null, myTotal: 0),
           regional: null,
+          byLevel: LevelScopeRanking(top: [], myRank: null, myLevel: 1, myXp: 0),
         );
 
       await tester.pumpWidget(_wrap(rankingApi: rankingApi));
@@ -139,6 +145,7 @@ void main() {
         ..resultToReturn = const RankingResult(
           general: ScopeRanking(top: [], myRank: null, myTotal: 0),
           regional: null,
+          byLevel: LevelScopeRanking(top: [], myRank: null, myLevel: 1, myXp: 0),
         );
       final authApi = FakeAuthApi()..nicknameToReturn = 'Foguete Roxo';
 
@@ -153,6 +160,7 @@ void main() {
         ..resultToReturn = const RankingResult(
           general: ScopeRanking(top: [], myRank: null, myTotal: 0),
           regional: null,
+          byLevel: LevelScopeRanking(top: [], myRank: null, myLevel: 1, myXp: 0),
         );
       final authApi = FakeAuthApi();
 

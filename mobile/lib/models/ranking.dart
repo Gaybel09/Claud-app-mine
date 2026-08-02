@@ -61,8 +61,57 @@ class RegionalScopeRanking extends ScopeRanking {
   }
 }
 
+class LevelRankingEntry {
+  const LevelRankingEntry({
+    required this.rank,
+    required this.userId,
+    required this.displayName,
+    required this.level,
+    required this.xp,
+  });
+
+  final int rank;
+  final int userId;
+  final String displayName;
+  final int level;
+  final int xp;
+
+  factory LevelRankingEntry.fromJson(Map<String, dynamic> json) {
+    return LevelRankingEntry(
+      rank: json['rank'] as int,
+      userId: json['user_id'] as int,
+      displayName: json['display_name'] as String,
+      level: json['level'] as int,
+      xp: json['xp'] as int,
+    );
+  }
+}
+
+class LevelScopeRanking {
+  const LevelScopeRanking({
+    required this.top,
+    required this.myRank,
+    required this.myLevel,
+    required this.myXp,
+  });
+
+  final List<LevelRankingEntry> top;
+  final int? myRank;
+  final int myLevel;
+  final int myXp;
+
+  factory LevelScopeRanking.fromJson(Map<String, dynamic> json) {
+    return LevelScopeRanking(
+      top: (json['top'] as List).map((e) => LevelRankingEntry.fromJson(e as Map<String, dynamic>)).toList(),
+      myRank: json['my_rank'] as int?,
+      myLevel: json['my_level'] as int,
+      myXp: json['my_xp'] as int,
+    );
+  }
+}
+
 class RankingResult {
-  const RankingResult({required this.general, required this.regional});
+  const RankingResult({required this.general, required this.regional, required this.byLevel});
 
   final ScopeRanking general;
 
@@ -71,12 +120,17 @@ class RankingResult {
   /// caso.
   final RegionalScopeRanking? regional;
 
+  /// Ranking por nível/XP (seção "Níveis") -- nunca null, já que todo
+  /// usuário tem um nível (começa no 1 com 0 XP).
+  final LevelScopeRanking byLevel;
+
   factory RankingResult.fromJson(Map<String, dynamic> json) {
     return RankingResult(
       general: ScopeRanking.fromJson(json['general'] as Map<String, dynamic>),
       regional: json['regional'] == null
           ? null
           : RegionalScopeRanking.fromJson(json['regional'] as Map<String, dynamic>),
+      byLevel: LevelScopeRanking.fromJson(json['by_level'] as Map<String, dynamic>),
     );
   }
 }

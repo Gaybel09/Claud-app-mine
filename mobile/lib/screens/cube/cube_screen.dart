@@ -11,6 +11,7 @@ import '../../services/mining_api.dart';
 import '../../services/rewarded_ad_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/cube_visual.dart';
+import '../../widgets/level_progress_bar.dart';
 import '../../widgets/neon_progress_bar.dart';
 
 class CubeScreen extends StatefulWidget {
@@ -46,6 +47,13 @@ class _CubeScreenState extends State<CubeScreen> {
   // tempo.
   DateTime? _tickedEndsAt;
 
+  // Notifica LevelProgressCard pra reconsultar o XP assim que uma coleta
+  // termina (stage vira `collected`) -- sem acoplar o widget de nível
+  // diretamente ao MiningController, só um "algo mudou, recarregue" (ver
+  // _onControllerChanged/LevelProgressCard.refreshOn).
+  final ValueNotifier<int> _levelRefreshTicker = ValueNotifier(0);
+  CubeCycleStage? _lastStage;
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +77,10 @@ class _CubeScreenState extends State<CubeScreen> {
       _progressTicker = null;
       _tickedEndsAt = null;
     }
+    if (_controller.stage == CubeCycleStage.collected && _lastStage != CubeCycleStage.collected) {
+      _levelRefreshTicker.value++;
+    }
+    _lastStage = _controller.stage;
     setState(() {});
   }
 
@@ -93,6 +105,7 @@ class _CubeScreenState extends State<CubeScreen> {
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     _progressTicker?.cancel();
+    _levelRefreshTicker.dispose();
     super.dispose();
   }
 
@@ -104,8 +117,29 @@ class _CubeScreenState extends State<CubeScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text('Seu cubo', style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: 24),
-          Expanded(child: Center(child: _buildBody(context))),
+          const SizedBox(height: 16),
+          LevelProgressCard(refreshOn: _levelRefreshTicker),
+          const SizedBox(height: 16),
+          // LayoutBuilder + ConstrainedBox(minHeight) em vez de só
+          // Expanded(child: Center(...)): o conteúdo de _buildBody (cubo +
+          // barra + os dois botões de bônus + eventual texto de erro) já
+          // era alto por si só -- em telas baixas (ou com os dois erros de
+          // bônus visíveis ao mesmo tempo), ele conseguia estourar a altura
+          // disponível (RenderFlex overflow) mesmo antes do card de nível
+          // acima existir. Isso deixa o conteúdo centralizado quando cabe
+          // e rolável quando não cabe, em vez de simplesmente cortar/estourar.
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                    child: Center(child: _buildBody(context)),
+                  ),
+                );
+              },
+            ),
+          ),
         ],
       ),
     );

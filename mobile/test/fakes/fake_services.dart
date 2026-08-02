@@ -7,12 +7,14 @@ import 'package:cubemine_pix/models/app_user.dart';
 import 'package:cubemine_pix/models/cube.dart';
 import 'package:cubemine_pix/models/ledger_entry.dart';
 import 'package:cubemine_pix/models/mining_session.dart';
+import 'package:cubemine_pix/models/level_status.dart';
 import 'package:cubemine_pix/models/ranking.dart';
 import 'package:cubemine_pix/models/weekly_mission.dart';
 import 'package:cubemine_pix/models/withdrawal.dart';
 import 'package:cubemine_pix/services/ads_api.dart';
 import 'package:cubemine_pix/services/auth_api.dart';
 import 'package:cubemine_pix/services/cubes_api.dart';
+import 'package:cubemine_pix/services/levels_api.dart';
 import 'package:cubemine_pix/services/mining_api.dart';
 import 'package:cubemine_pix/services/missions_api.dart';
 import 'package:cubemine_pix/services/pix_api.dart';
@@ -134,6 +136,7 @@ class FakeRankingApi implements RankingApi {
         const RankingResult(
           general: ScopeRanking(top: [], myRank: null, myTotal: 0),
           regional: null,
+          byLevel: LevelScopeRanking(top: [], myRank: null, myLevel: 1, myXp: 0),
         );
   }
 }
@@ -159,6 +162,19 @@ class FakeMissionsApi implements MissionsApi {
           multiplierActive: false,
           multiplierExpiresAt: null,
         );
+  }
+}
+
+class FakeLevelsApi implements LevelsApi {
+  LevelStatus? resultToReturn;
+  Object? throwOnGetMyLevel;
+  int getMyLevelCallCount = 0;
+
+  @override
+  Future<LevelStatus> getMyLevel() async {
+    getMyLevelCallCount++;
+    if (throwOnGetMyLevel != null) throw throwOnGetMyLevel!;
+    return resultToReturn ?? const LevelStatus(level: 1, xp: 0, xpIntoLevel: 0, xpForNextLevel: 150);
   }
 }
 

@@ -22,9 +22,11 @@ class _RankingScreenData {
   final AppUser user;
 }
 
+enum _RankingScope { general, regional, level }
+
 class _RankingScreenState extends State<RankingScreen> {
   late Future<_RankingScreenData> _dataFuture;
-  bool _showRegional = false;
+  _RankingScope _scope = _RankingScope.general;
 
   @override
   void initState() {
@@ -112,18 +114,18 @@ class _RankingScreenState extends State<RankingScreen> {
                     onEdit: () => _editNickname(data.user.nickname),
                   ),
                   const SizedBox(height: 24),
-                  if (data.ranking.regional != null) ...[
-                    _ScopeToggle(
-                      regionLabel: data.ranking.regional!.regionLabel,
-                      showRegional: _showRegional,
-                      onChanged: (value) => setState(() => _showRegional = value),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  _ScopeRankingView(
-                    scope: _showRegional ? data.ranking.regional! : data.ranking.general,
-                    currentUserId: data.user.id,
+                  _ScopeToggle(
+                    regionLabel: data.ranking.regional?.regionLabel,
+                    scope: _scope,
+                    onChanged: (value) => setState(() => _scope = value),
                   ),
+                  const SizedBox(height: 16),
+                  if (_scope == _RankingScope.level)
+                    _LevelScopeRankingView(scope: data.ranking.byLevel, currentUserId: data.user.id)
+                  else if (_scope == _RankingScope.regional && data.ranking.regional != null)
+                    _ScopeRankingView(scope: data.ranking.regional!, currentUserId: data.user.id)
+                  else
+                    _ScopeRankingView(scope: data.ranking.general, currentUserId: data.user.id),
                 ],
               );
             },
@@ -163,28 +165,38 @@ class _NicknameCard extends StatelessWidget {
 }
 
 class _ScopeToggle extends StatelessWidget {
-  const _ScopeToggle({required this.regionLabel, required this.showRegional, required this.onChanged});
+  const _ScopeToggle({required this.regionLabel, required this.scope, required this.onChanged});
 
-  final String regionLabel;
-  final bool showRegional;
-  final ValueChanged<bool> onChanged;
+  /// null quando o usuário ainda não tem região detectada -- o chip
+  /// regional some nesse caso (ver RankingResult.regional).
+  final String? regionLabel;
+  final _RankingScope scope;
+  final ValueChanged<_RankingScope> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
       children: [
         ChoiceChip(
           key: const Key('ranking_scope_general_chip'),
           label: const Text('Geral'),
-          selected: !showRegional,
-          onSelected: (_) => onChanged(false),
+          selected: scope == _RankingScope.general,
+          onSelected: (_) => onChanged(_RankingScope.general),
         ),
-        const SizedBox(width: 8),
+        if (regionLabel != null)
+          ChoiceChip(
+            key: const Key('ranking_scope_regional_chip'),
+            label: Text(regionLabel!),
+            selected: scope == _RankingScope.regional,
+            onSelected: (_) => onChanged(_RankingScope.regional),
+          ),
         ChoiceChip(
-          key: const Key('ranking_scope_regional_chip'),
-          label: Text(regionLabel),
-          selected: showRegional,
-          onSelected: (_) => onChanged(true),
+          key: const Key('ranking_scope_level_chip'),
+          label: const Text('Nível'),
+          selected: scope == _RankingScope.level,
+          onSelected: (_) => onChanged(_RankingScope.level),
         ),
       ],
     );
@@ -279,6 +291,101 @@ class _RankingTile extends StatelessWidget {
         trailing: Text(
           'R\$ ${entry.total.toStringAsFixed(2)}',
           style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.success),
+        ),
+      ),
+    );
+  }
+}
+
+class _LevelScopeRankingView extends StatelessWidget {
+  const _LevelScopeRankingView({required this.scope, required this.currentUserId});
+
+  final LevelScopeRanking scope;
+  final int currentUserId;
+
+  @override
+  Widget build(BuildContext context) {
+    final myEntryInTop = scope.top.any((entry) => entry.userId == currentUserId);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (scope.top.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Text(
+              'Ninguém no ranking ainda -- minere para aparecer aqui!',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          )
+        else
+          ...scope.top.map(
+            (entry) => _LevelRankingTile(entry: entry, highlighted: entry.userId == currentUserId),
+          ),
+        if (!myEntryInTop && scope.myRank != null) ...[
+          const SizedBox(height: 8),
+          _LevelRankingTile(
+            entry: LevelRankingEntry(
+              rank: scope.myRank!,
+              userId: currentUserId,
+              displayName: 'Você',
+              level: scope.myLevel,
+              xp: scope.myXp,
+            ),
+            highlighted: true,
+          ),
+        ],
+        if (scope.myRank == null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Você está no nível ${scope.myLevel} (${scope.myXp} XP) -- minere mais pra subir no ranking!',
+              key: const Key('ranking_level_no_rank_text'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _LevelRankingTile extends StatelessWidget {
+  const _LevelRankingTile({required this.entry, required this.highlighted});
+
+  final LevelRankingEntry entry;
+  final bool highlighted;
+
+  static const _medalColors = {
+    1: Color(0xFFFFD54A),
+    2: Color(0xFFC0C0C0),
+    3: Color(0xFFCD7F32),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      key: highlighted ? const Key('ranking_my_level_position_tile') : null,
+      margin: const EdgeInsets.only(bottom: 8),
+      color: highlighted ? AppColors.neonPurple.withValues(alpha: 0.25) : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: highlighted ? const BorderSide(color: AppColors.neonBlue, width: 1.5) : BorderSide.none,
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: _medalColors[entry.rank] ?? AppColors.surfaceDark,
+          child: Text(
+            '${entry.rank}',
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
+          ),
+        ),
+        title: Text(
+          entry.displayName,
+          style: TextStyle(fontWeight: highlighted ? FontWeight.bold : FontWeight.normal),
+        ),
+        trailing: Text(
+          'Nível ${entry.level} · ${entry.xp} XP',
+          style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.neonBlue),
         ),
       ),
     );

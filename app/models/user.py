@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -76,3 +76,14 @@ class User(Base):
     weekly_mission_multiplier_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    # Sistema de XP/Níveis (app/modules/levels/): quantas vezes essa missão
+    # semanal já foi completada, contando desde sempre (nunca reseta) --
+    # incrementado por maybe_activate_weekly_mission no mesmo instante em
+    # que weekly_mission_multiplier_until é ativado. É o único estado que
+    # precisa ser persistido pro XP: o XP ganho MINERANDO nunca é gravado
+    # aqui, é sempre derivado da soma histórica de LedgerEntry `reward` do
+    # usuário (mesmo padrão do ranking geral) -- só o XP bônus de missão
+    # não tem nenhum rastro equivalente no ledger, por isso precisa deste
+    # contador (ver levels.service.total_xp).
+    weekly_missions_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

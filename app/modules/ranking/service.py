@@ -9,9 +9,18 @@ from sqlalchemy.orm import Session
 from app.models.ledger_entry import LedgerEntry, LedgerEntryType
 from app.models.reward_fund import SINGLETON_ID, RewardFund
 from app.models.user import User
+from app.modules.levels.service import total_xp as compute_total_xp
+from app.modules.levels.service import level_from_xp
 from app.modules.mining.service import REWARD_FUND_SAFETY_MARGIN
 from app.modules.wallet.service import create_ledger_entry
-from app.schemas.ranking import RankingEntry, RankingRead, RegionalScopeRanking, ScopeRanking
+from app.schemas.ranking import (
+    LevelRankingEntry,
+    LevelScopeRanking,
+    RankingEntry,
+    RankingRead,
+    RegionalScopeRanking,
+    ScopeRanking,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +127,48 @@ def _scope_ranking(rows: list[tuple[User, Decimal]], current_user_id: int, limit
     return ScopeRanking(top=top, my_rank=my_rank, my_total=my_total)
 
 
+def _level_rows(all_rows: list[tuple[User, Decimal]]) -> list[tuple[User, int]]:
+    """Reaproveita a MESMA query de _lifetime_totals (all_rows já traz todo
+    usuário com pelo menos 1 reward + seu total histórico em dinheiro) --
+    só recalcula o XP de cada um (que inclui o bônus fixo de missão
+    semanal, não só dinheiro) e reordena por XP, já que a ordem por
+    dinheiro de all_rows não é necessariamente a mesma. Sem query extra ao
+    banco."""
+    rows = [(user, compute_total_xp(reward_total, user.weekly_missions_completed)) for user, reward_total in all_rows]
+    rows.sort(key=lambda user_xp: (-user_xp[1], user_xp[0].id))
+    return rows
+
+
+def _level_scope_ranking(
+    rows: list[tuple[User, int]], all_rows: list[tuple[User, Decimal]], current_user: User, limit: int
+) -> LevelScopeRanking:
+    top = [
+        LevelRankingEntry(
+            rank=position,
+            user_id=user.id,
+            display_name=display_name(user),
+            level=level_from_xp(xp).level,
+            xp=xp,
+        )
+        for position, (user, xp) in enumerate(rows[:limit], start=1)
+    ]
+    my_rank: int | None = None
+    for position, (user, _xp) in enumerate(rows, start=1):
+        if user.id == current_user.id:
+            my_rank = position
+            break
+
+    # Ao contrário de general/regional (que só existem pra quem já
+    # coletou pelo menos 1 reward -- ver o INNER JOIN de _lifetime_totals),
+    # TODO usuário tem um nível (começa no 1 com 0 XP) mesmo sem nenhuma
+    # coleta ainda -- por isso my_level/my_xp nunca ficam de fora, mesmo
+    # quando o usuário não aparece em `rows` (reward total 0 nesse caso).
+    reward_by_user_id = {user.id: total for user, total in all_rows}
+    my_reward_total = reward_by_user_id.get(current_user.id, Decimal("0"))
+    my_xp = compute_total_xp(my_reward_total, current_user.weekly_missions_completed)
+    return LevelScopeRanking(top=top, my_rank=my_rank, my_level=level_from_xp(my_xp).level, my_xp=my_xp)
+
+
 def get_ranking(db: Session, current_user: User, limit: int = 10) -> RankingRead:
     all_rows = _lifetime_totals(db)
     general = _scope_ranking(all_rows, current_user.id, limit)
@@ -133,7 +184,9 @@ def get_ranking(db: Session, current_user: User, limit: int = 10) -> RankingRead
             **scope.model_dump(),
         )
 
-    return RankingRead(general=general, regional=regional)
+    by_level = _level_scope_ranking(_level_rows(all_rows), all_rows, current_user, limit)
+
+    return RankingRead(general=general, regional=regional, by_level=by_level)
 
 
 def _month_window(for_month: date | None) -> tuple[datetime, datetime]:

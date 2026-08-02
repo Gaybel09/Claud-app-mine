@@ -4,6 +4,7 @@ import 'package:cubemine_pix/models/mining_session.dart';
 import 'package:cubemine_pix/screens/cube/cube_screen.dart';
 import 'package:cubemine_pix/services/ads_api.dart';
 import 'package:cubemine_pix/services/cubes_api.dart';
+import 'package:cubemine_pix/services/levels_api.dart';
 import 'package:cubemine_pix/services/mining_api.dart';
 import 'package:cubemine_pix/services/rewarded_ad_service.dart';
 import 'package:cubemine_pix/theme/app_theme.dart';
@@ -57,6 +58,7 @@ void main() {
             Provider<AdsApi>.value(value: adsApi),
             Provider<MiningApi>.value(value: miningApi),
             Provider<RewardedAdService>.value(value: FakeRewardedAdService()),
+            Provider<LevelsApi>.value(value: FakeLevelsApi()),
           ],
           child: MaterialApp(
             theme: AppTheme.dark,
@@ -113,6 +115,7 @@ void main() {
             Provider<AdsApi>.value(value: adsApi),
             Provider<MiningApi>.value(value: miningApi),
             Provider<RewardedAdService>.value(value: FakeRewardedAdService()),
+            Provider<LevelsApi>.value(value: FakeLevelsApi()),
           ],
           child: MaterialApp(
             theme: AppTheme.dark,
@@ -183,6 +186,7 @@ void main() {
             Provider<AdsApi>.value(value: adsApi),
             Provider<MiningApi>.value(value: miningApi),
             Provider<RewardedAdService>.value(value: FakeRewardedAdService()),
+            Provider<LevelsApi>.value(value: FakeLevelsApi()),
           ],
           child: MaterialApp(
             theme: AppTheme.dark,
@@ -225,6 +229,7 @@ void main() {
             Provider<AdsApi>.value(value: adsApi),
             Provider<MiningApi>.value(value: miningApi),
             Provider<RewardedAdService>.value(value: rewardedAdService),
+            Provider<LevelsApi>.value(value: FakeLevelsApi()),
           ],
           child: MaterialApp(theme: AppTheme.dark, home: const CubeScreen()),
         ),
@@ -285,6 +290,7 @@ void main() {
             Provider<AdsApi>.value(value: adsApi),
             Provider<MiningApi>.value(value: miningApi),
             Provider<RewardedAdService>.value(value: FakeRewardedAdService()),
+            Provider<LevelsApi>.value(value: FakeLevelsApi()),
           ],
           child: MaterialApp(
             theme: AppTheme.dark,

@@ -10,6 +10,7 @@ from app.modules.ads.router import router as ads_router
 from app.modules.auth.router import router as auth_router
 from app.modules.cubes.router import router as cubes_router
 from app.modules.health.router import router as health_router
+from app.modules.levels.router import router as levels_router
 from app.modules.mining.router import router as mining_router
 from app.modules.missions.router import router as missions_router
 from app.modules.pix.router import router as pix_router
@@ -31,6 +32,7 @@ app.include_router(wallet_router)
 app.include_router(ads_router)
 app.include_router(mining_router)
 app.include_router(missions_router)
+app.include_router(levels_router)
 app.include_router(cubes_router)
 app.include_router(pix_router)
 app.include_router(reward_router)
