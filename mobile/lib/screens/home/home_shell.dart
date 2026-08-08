@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../widgets/app_background.dart';
 import '../cube/cube_screen.dart';
+import '../game/game_screen.dart';
 import '../missions/missions_screen.dart';
 import '../ranking/ranking_screen.dart';
 import '../wallet/wallet_screen.dart';
@@ -16,7 +17,7 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  static const _screens = [CubeScreen(), MissionsScreen(), RankingScreen(), WalletScreen()];
+  static const _screens = [CubeScreen(), GameScreen(), MissionsScreen(), RankingScreen(), WalletScreen()];
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +31,11 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.widgets_outlined),
             selectedIcon: Icon(Icons.widgets),
             label: 'Cubo',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.sports_martial_arts_outlined),
+            selectedIcon: Icon(Icons.sports_martial_arts),
+            label: 'Jogar',
           ),
           NavigationDestination(
             icon: Icon(Icons.flag_outlined),
